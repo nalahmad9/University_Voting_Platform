@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Student {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  universityId    String      @unique(map: "students_university_id_key") @map("university_id") @db.VarChar(20)
+  fullName        String      @map("full_name") @db.VarChar(100)
+  email           String      @unique(map: "students_email_unique") @db.VarChar(100)
+  passwordHash    String      @map("password_hash") @db.VarChar(255)
+  photoUrl        String      @map("photo_url")
+  department      String      @db.VarChar(50)
+  classYear       Int         @map("class_year")
+  clubMemberships String[]    @default([]) @map("club_memberships")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  candidates      Candidate[]
+  voterLogs       VoterLog[]
+
+  @@map("students")
+}
+
+model Ballot {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title       String      @db.VarChar(150)
+  description String?
+  scopeType   String      @map("scope_type") @db.VarChar(20)
+  scopeTarget String?     @map("scope_target") @db.VarChar(100)
+  startTime   DateTime    @map("start_time") @db.Timestamptz(6)
+  endTime     DateTime    @map("end_time") @db.Timestamptz(6)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  candidates  Candidate[]
+  voterLogs   VoterLog[]
+  voteHashes  VoteHash[]
+
+  @@index([startTime, endTime], map: "ballots_voting_window_idx")
+  @@map("ballots")
+}
+
+model Candidate {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ballotId           String     @map("ballot_id") @db.Uuid
+  studentId          String     @map("student_id") @db.Uuid
+  candidacyStatement String     @map("candidacy_statement")
+  manifestoText      String     @map("manifesto_text")
+  nominationStatus   String     @default("PENDING") @map("nomination_status") @db.VarChar(20)
+  rejectionReason    String?    @map("rejection_reason")
+  aiSummary          Json?      @map("ai_summary")
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  ballot             Ballot     @relation(fields: [ballotId], references: [id], onDelete: Cascade)
+  student            Student    @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  voteHashes         VoteHash[] @relation("CandidateVotes")
+
+  @@unique([ballotId, id], map: "candidates_ballot_id_id_unique")
+  @@unique([ballotId, studentId], map: "candidates_student_ballot_unique")
+  @@index([ballotId, nominationStatus, createdAt], map: "candidates_ballot_status_idx")
+  @@map("candidates")
+}
+
+model VoterLog {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studentId            String   @map("student_id") @db.Uuid
+  ballotId             String   @map("ballot_id") @db.Uuid
+  votedAt              DateTime @default(now()) @map("voted_at") @db.Timestamptz(6)
+  blindedRequestDigest String   @map("blinded_request_digest") @db.Char(64)
+  idempotencyKeyDigest String   @map("idempotency_key_digest") @db.Char(64)
+  student              Student  @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  ballot               Ballot   @relation(fields: [ballotId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, ballotId], map: "voter_logs_student_ballot_unique")
+  @@unique([ballotId, idempotencyKeyDigest], map: "voter_logs_ballot_idempotency_unique")
+  @@map("voter_logs")
+}
+
+model VoteHash {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ballotId         String    @map("ballot_id") @db.Uuid
+  candidateId      String    @map("candidate_id") @db.Uuid
+  tokenDigest      String    @unique @map("token_digest") @db.Char(64)
+  receiptHash      String    @unique @map("receipt_hash") @db.Char(64)
+  timeTakenSeconds Int       @map("time_taken_seconds")
+  anomalyScore     Decimal   @map("anomaly_score") @db.Decimal(5, 4)
+  isQuarantined    Boolean   @default(false) @map("is_quarantined")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  ballot           Ballot    @relation(fields: [ballotId], references: [id], onDelete: Restrict)
+  candidate        Candidate @relation("CandidateVotes", fields: [ballotId, candidateId], references: [ballotId, id], onDelete: Restrict)
+
+  @@index([ballotId, candidateId], map: "vote_hashes_ballot_candidate_idx")
+  @@index([ballotId, isQuarantined], map: "vote_hashes_ballot_quarantine_idx")
+  @@map("vote_hashes")
+}

@@ -11,16 +11,18 @@
 !.yarn/versions
 
 # testing
-/coverage
+coverage/
 
 # next.js
-/.next/
-/.vinext/
-/out/
+**/.next/
+**/.vinext/
+**/out/
 
 # misc
 .DS_Store
 *.pem
+**/.local-keys/
+/.blind-vote-test/
 
 # debug
 npm-debug.log*
@@ -30,17 +32,31 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!**/.env.example
 
 # vercel
 .vercel
 
 # typescript
 next-env.d.ts
-/dist/
-/.wrangler/
+dist/
+**/dist/
+**/.wrangler/
+**/.sites-runtime/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
 # Checkout-local execution profile and tool state; never publish them.
 /.sites-runtime/
 /.agents/
 /.codex/
 /outputs/
 /work/
+
+# Private local seed photographs
+apps/express-api/prisma/seed-assets/*
+!apps/express-api/prisma/seed-assets/.gitkeep
