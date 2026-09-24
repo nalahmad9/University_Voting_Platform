@@ -2,7 +2,7 @@ services:
   - type: web
     name: quorum-express-api
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm ci && npm run build:api
     startCommand: npm run start --workspace @quorum/express-api
     healthCheckPath: /api/v1/health
@@ -28,20 +28,15 @@ services:
       - key: GROQ_MANIFESTO_MODEL
         value: openai/gpt-oss-20b
       - key: BLIND_SIGNING_KEY_DIRECTORY
-        value: /var/data/blind-keys
+        value: /tmp/blind-keys
       - key: DEV_ADMIN_EMAIL
         sync: false
       - key: DEV_ADMIN_PASSWORD
         sync: false
-    disk:
-      name: blind-signing-keys
-      mountPath: /var/data
-      sizeGB: 1
-
   - type: web
     name: quorum-ai-service
     runtime: python
-    plan: starter
+    plan: free
     rootDir: apps/ai-service
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
