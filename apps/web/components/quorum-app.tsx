@@ -213,15 +213,15 @@ function Shell({ role, user, children, onLogout }: { role: Role; user?: Authenti
 
   return (
     <div className="min-h-screen bg-[#f5f1e8] text-[#211a22] lg:flex">
-      <aside className="sticky top-0 hidden h-screen w-[270px] shrink-0 flex-col bg-[#17111f] p-6 text-[#bfb4c4] lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-[270px] shrink-0 flex-col overflow-hidden bg-[#17111f] p-6 text-[#bfb4c4] lg:flex">
         <Brand />
         <div className={`mt-10 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest ${role === "student" ? "bg-[#123c38] text-[#7bdbc2]" : "bg-[#49351d] text-[#ecc56e]"}`}>{role} access</div>
-        <nav className="mt-7 space-y-2">
+        <nav className="scrollbar-thin mt-7 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
           {nav.map(([label, Icon, path]) => (
             <button key={path} onClick={() => router.push(path)} className={`focus-ring flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${pathname === path ? "bg-[#3c2030] text-white shadow-[inset_3px_0_0_#c49a4a]" : "hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{label}</button>
           ))}
         </nav>
-        <div className="mt-auto border-t border-white/10 pt-6">
+        <div className="shrink-0 border-t border-white/10 pt-6">
           <div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-full bg-[#9d5c37] font-bold text-white">{initialsFor(displayName)}</div><div className="font-semibold text-white">{displayName}</div></div>
           <button onClick={onLogout} className="mt-5 flex items-center gap-2 text-sm hover:text-white"><LogOut size={16} />Sign out</button>
         </div>
