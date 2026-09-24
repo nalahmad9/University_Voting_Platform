@@ -2,7 +2,9 @@
 
 Quorum is a privacy-focused university election platform for managing the complete election lifecycle: ballot creation, student nominations, candidate review, manifesto comparison, voter verification, anonymous voting, anomaly review, result publication, receipt verification, and runoff elections.
 
-This repository contains the complete interactive academic prototype. It demonstrates the intended architecture and security boundaries, but it is not certified production election infrastructure.
+[Live demonstration](https://university-voting-platform-web.vercel.app)
+
+This repository contains a full-stack interactive prototype. It demonstrates the application workflow and privacy architecture; additional independent security and operational review would be required before use in a real election.
 
 ## Core capabilities
 
@@ -12,7 +14,7 @@ This repository contains the complete interactive academic prototype. It demonst
 - Administrator nomination approval and rejection workflows.
 - Manifesto highlights and topic-based candidate comparison.
 - Browser-based face and presence verification.
-- Candidate self-voting prevention.
+- Candidate voting restrictions for ballots in which they are standing.
 - Blind-signature voting authorization and credential-free vote submission.
 - SHA-256 voting receipts with public verification.
 - Privacy-preserving anomaly scoring and administrator review.
@@ -34,7 +36,7 @@ flowchart LR
 | --- | --- | --- |
 | Web application | TypeScript, React, Next.js-compatible App Router, Vinext, Tailwind CSS | Student, administrator, and public experiences |
 | Core API | Node.js, Express, TypeScript, Zod | Authentication, ballots, nominations, voting, receipts, and administration |
-| Data access | Prisma ORM, PostgreSQL | Typed access to the approved five-table schema |
+| Data access | Prisma ORM, PostgreSQL | Typed persistence for election and voting records |
 | Database and storage | Supabase | PostgreSQL hosting and private profile-photo storage |
 | AI service | Python, FastAPI, scikit-learn | Isolation Forest anomaly assessment |
 | Manifesto intelligence | Groq SDK | Grounded manifesto highlights and comparison topics |
@@ -57,7 +59,7 @@ quorum/
 
 ## Privacy model
 
-The database follows the five entities in the approved ERD:
+Election data is organized across five core tables:
 
 - `students`
 - `ballots`
@@ -79,7 +81,7 @@ Install the following before running Quorum locally:
 - A Supabase project
 - A Groq API key for manifesto processing
 - Git and VS Code are recommended for development
-- k6 is optional and is needed only for approved staging load tests
+- k6 is optional and is needed only for staging load tests
 
 ## Local setup
 
@@ -116,18 +118,18 @@ GROQ_API_KEY=your_groq_api_key
 
 Do not commit `.env` files, database passwords, Supabase secret keys, JWT secrets, Groq keys, or signing-key material.
 
-### 3. Configure local test passwords
+### 3. Configure local accounts
 
-The following values are recommended for local testing only:
+Choose development credentials in `apps/express-api/.env`:
 
 ```dotenv
-SEED_STUDENT_PASSWORD=StudentTest2026!
+SEED_STUDENT_PASSWORD=choose_a_local_student_password
 DEV_ADMIN_NAME=Election Administrator
 DEV_ADMIN_EMAIL=admin@quorum.edu
-DEV_ADMIN_PASSWORD=AdminTest2026!
+DEV_ADMIN_PASSWORD=choose_a_local_admin_password
 ```
 
-Add them to `apps/express-api/.env`. These passwords are intentionally documented test values and must never be used in a deployed environment. If you already configured different passwords, use your existing values when signing in.
+Use separate values for local development and hosted environments. Never publish or commit working administrator or student passwords.
 
 ### 4. Prepare the Python service
 
@@ -157,39 +159,39 @@ npm run db:seed --workspace @quorum/express-api
 
 The seed process hashes `SEED_STUDENT_PASSWORD` with Argon2id before storing it. It also creates the private `profile-photos` bucket when needed and uploads the development profile photo.
 
-## Test accounts
+## Development accounts
 
-The table below assumes the recommended local passwords from the setup section.
+The seed script creates the following representative accounts. Their passwords are supplied through environment variables and are not stored in this repository.
 
-| Role | Name | Sign-in identifier | Password | Suggested use |
+| Role | Name | Sign-in identifier | Password source | Suggested use |
 | --- | --- | --- | --- | --- |
-| Administrator | Election Administrator | `admin@quorum.edu` | `AdminTest2026!` | Create ballots, review nominations and anomalies, publish results, and create runoffs |
-| Student | Nada Alahmad | `20260001` or `nada.alahmad@quorum.edu` | `StudentTest2026!` | Submit and track a nomination |
-| Student | Maya Khalil | `20260002` or `maya.khalil@quorum.edu` | `StudentTest2026!` | Submit a second nomination for comparison |
-| Student | Omar Haddad | `20260003` or `omar.haddad@quorum.edu` | `StudentTest2026!` | Vote in a ballot where the account is not a candidate |
+| Administrator | Election Administrator | `admin@quorum.edu` | `DEV_ADMIN_PASSWORD` | Create ballots, review nominations and anomalies, publish results, and create runoffs |
+| Student | Nada Alahmad | `20260001` or `nada.alahmad@quorum.edu` | `SEED_STUDENT_PASSWORD` | Submit and track a nomination |
+| Student | Maya Khalil | `20260002` or `maya.khalil@quorum.edu` | `SEED_STUDENT_PASSWORD` | Submit a second nomination for comparison |
+| Student | Omar Haddad | `20260003` or `omar.haddad@quorum.edu` | `SEED_STUDENT_PASSWORD` | Vote in a ballot where the account is not a candidate |
 
-All student passwords are stored only as Argon2id hashes. The plaintext development password exists only in your local `.env` file and this documented local-testing example.
+Student passwords are hashed with Argon2id before storage. Credentials for the hosted demonstration are available privately on request.
 
 ## Run the platform
 
 Open three terminals at the repository root.
 
-Terminal 1 — Express API:
+Terminal 1 — FastAPI service:
+
+```powershell
+.\apps\ai-service\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir apps/ai-service --reload --port 8000
+```
+
+Terminal 2 — Express API:
 
 ```bash
 npm run dev:api
 ```
 
-Terminal 2 — web application:
+Terminal 3 — web application:
 
 ```bash
 npm run dev:web
-```
-
-Terminal 3 — FastAPI service, with the Python virtual environment activated:
-
-```bash
-npm run dev:ai
 ```
 
 Local services:
@@ -230,16 +232,16 @@ A candidate cannot vote in a ballot in which they are standing, but may vote in 
 | `npm run test:voting` | Run blind-voting, receipt, tally, anomaly, and manifesto tests |
 | `npm run test:ai` | Run FastAPI service tests |
 | `npm run test:bot` | Run the browser-based high-velocity voting test |
-| `npm run test:load` | Run the k6 load test against an approved environment |
+| `npm run test:load` | Run the k6 load test against a staging environment you control |
 
 `test:bot` requires the web, API, and AI services to be running. `test:load` requires the k6 CLI. Never run the load test against a live production election.
 
 ## Security and production readiness
 
-Quorum currently provides a complete academic prototype. Before real election use, the deployment requires:
+Quorum currently provides a complete full-stack prototype. Before real election use, the deployment requires:
 
 - Independent review of the blind-signature protocol and key management.
-- Production-grade biometric liveness protection and an approved consent policy.
+- Production-grade biometric liveness protection and a documented consent and privacy policy.
 - Penetration testing and dependency auditing.
 - Privacy, retention, logging, and infrastructure-access reviews.
 - Managed secrets and signing keys.
@@ -250,4 +252,4 @@ Do not describe the system as providing absolute or guaranteed anonymity. Blind 
 
 ## License
 
-This project is currently intended for academic development and evaluation. Add the institution-approved license before public distribution.
+This project is intended for academic development, evaluation, and portfolio demonstration. No open-source license has currently been assigned.
