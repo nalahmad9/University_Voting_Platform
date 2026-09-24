@@ -3,7 +3,7 @@ services:
     name: quorum-express-api
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build:api
+    buildCommand: npm ci --include=dev && npm run prisma:generate --workspace @quorum/express-api && npm run build:api
     startCommand: npm run start --workspace @quorum/express-api
     healthCheckPath: /api/v1/health
     envVars:
