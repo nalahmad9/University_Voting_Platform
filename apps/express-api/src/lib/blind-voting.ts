@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,6 +101,13 @@ export function voteTokenMessage(input: {
 
 export function sha256Hex(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+export function createReceiptHash(): string {
+  const receiptDomain = Buffer.from("quorum.receipt.v1\0", "utf8");
+  const receiptNonce = randomBytes(32);
+
+  return sha256Hex(Buffer.concat([receiptDomain, receiptNonce]));
 }
 
 export function decodeBase64Url(value: string): Uint8Array {

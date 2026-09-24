@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
@@ -10,6 +9,10 @@ import type {
 } from "@quorum/shared";
 import { verifyLivenessProof } from "../auth/jwt.js";
 import {
+  assessAnonymousVote,
+  type RequestRateBucket
+} from "../lib/anomaly-intelligence.js";
+import {
   requireAuthentication,
   type AuthenticatedRequest
 } from "../middleware/authentication.js";
@@ -17,6 +20,7 @@ import {
   BLIND_KEY_VERSION,
   BLIND_SIGNATURE_SUITE,
   blindSuite,
+  createReceiptHash,
   decodeBase64Url,
   encodeBase64Url,
   getBallotKeyPair,
@@ -58,12 +62,10 @@ function votingIsOpen(ballot: { startTime: Date; endTime: Date }): boolean {
   return now >= ballot.startTime && now <= ballot.endTime;
 }
 
-function anomalyScore(features: z.infer<typeof castVoteSchema>["riskFeatures"]): number {
-  let score = 0;
-  if (features.completionDurationBand === "under_20_seconds") score += 0.35;
-  if (features.deviceClass === "unknown") score += 0.1;
-  if (features.replayIndicator) score += 0.8;
-  return Math.min(1, score);
+function requestRateBucket(recentVoteCount: number): RequestRateBucket {
+  if (recentVoteCount >= 30) return "high";
+  if (recentVoteCount >= 10) return "elevated";
+  return "normal";
 }
 
 router.get("/voting/ballots/:ballotId/key", async (request, response) => {
@@ -254,10 +256,20 @@ router.post("/cast-vote", async (request, response) => {
     return;
   }
 
+  const recentVoteCount = await prisma.voteHash.count({
+    where: {
+      ballotId: ballot.id,
+      createdAt: { gte: new Date(Date.now() - 60_000) }
+    }
+  });
+  const assessment = await assessAnonymousVote({
+    ...input.data.riskFeatures,
+    requestRateBucket: requestRateBucket(recentVoteCount)
+  });
   const tokenDigest = sha256Hex(token);
-  const receipt = randomBytes(32).toString("hex");
-  const score = anomalyScore(input.data.riskFeatures);
-  const isQuarantined = score >= 0.75;
+  const receipt = createReceiptHash();
+  const score = assessment.riskScore;
+  const isQuarantined = assessment.quarantined;
   try {
     const vote = await prisma.$transaction(async transaction => transaction.voteHash.create({
       data: {
@@ -267,7 +279,13 @@ router.post("/cast-vote", async (request, response) => {
         receiptHash: receipt,
         timeTakenSeconds: input.data.timeTakenSeconds,
         anomalyScore: new Prisma.Decimal(score),
-        isQuarantined
+        isQuarantined,
+        riskFeatures: {
+          ...input.data.riskFeatures,
+          requestRateBucket: requestRateBucket(recentVoteCount)
+        },
+        anomalyModelVersion: assessment.modelVersion,
+        reviewStatus: isQuarantined ? "PENDING" : "NOT_REQUIRED"
       },
       select: { createdAt: true }
     }));

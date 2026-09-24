@@ -14,6 +14,7 @@
   "scripts": {
     "dev:web": "npm run dev --workspace @quorum/web",
     "dev:api": "npm run dev --workspace @quorum/express-api",
+    "dev:ai": "python -m uvicorn app.main:app --app-dir apps/ai-service --reload --port 8000",
     "build:web": "npm run build --workspace @quorum/web && node scripts/prepare-sites-output.mjs",
     "build:api": "npm run build --workspace @quorum/shared && npm run build --workspace @quorum/express-api",
     "build": "npm run build:api && npm run build:web",
@@ -24,6 +25,10 @@
     "blind-vote:prepare": "node scripts/blind-vote-helper.mjs prepare",
     "blind-vote:finalize": "node scripts/blind-vote-helper.mjs finalize",
     "blind-vote:clear": "node scripts/blind-vote-helper.mjs clear",
+    "test:voting": "npm run test --workspace @quorum/express-api",
+    "test:ai": "python -m pytest apps/ai-service/tests",
+    "test:bot": "node tests/bots/high-velocity-voting.mjs",
+    "test:load": "k6 run tests/load/quorum-api.js",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "overrides": {
@@ -32,6 +37,7 @@
     }
   },
   "devDependencies": {
+    "puppeteer-core": "^25.11.0",
     "supabase": "^2.117.0"
   }
 }

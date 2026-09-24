@@ -1,26 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Bell, CalendarDays,
-  Check, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Copy, Download,
-  FileCheck2, Fingerprint, Gauge, KeyRound, LayoutDashboard, ListChecks,
-  LockKeyhole, LogOut, Megaphone, Plus, Scale, Search,
-  ShieldCheck, Sparkles, UserCheck, Users, Vote, XCircle,
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  ClipboardCheck,
+  LayoutDashboard,
+  ListChecks,
+  LockKeyhole,
+  LogOut,
+  Megaphone,
+  Plus,
+  ShieldCheck,
+  Vote,
 } from "lucide-react";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader,
-  DialogTitle, DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { AuthenticatedAdministrator, AuthenticatedStudent, PersistedBallotPhase, StudentBallotRecord } from "@quorum/shared";
+import type { AuthenticatedAdministrator, AuthenticatedStudent } from "@quorum/shared";
 import {
   AuthenticationError,
   clearStoredSession,
@@ -33,360 +29,379 @@ import {
   type QuorumSession,
 } from "@/lib/auth-client";
 import { AdminBallotBuilder, AdminBallotList } from "@/components/admin-ballots";
+import { AdminOperationsOverview } from "@/components/admin-overview";
 import { StudentBallotDashboard } from "@/components/student-ballots";
 import { StudentNominations } from "@/components/student-nominations";
-import { listAdminNominations } from "@/lib/admin-nominations-client";
-import { FaceVerification } from "@/components/face-verification";
-import { listStudentBallots } from "@/lib/ballots-client";
-import { listApprovedCandidates, loadCandidatePhoto } from "@/lib/candidates-client";
-import { castBlindVote } from "@/lib/blind-voting-client";
-import { registerLivenessCompletion } from "@/lib/face-verification-client";
+import { StudentVoting, type VotingState } from "@/components/student-voting";
+import { ReceiptLookup } from "@/components/receipt-lookup";
+import { verifyPublicReceipt } from "@/lib/receipt-client";
+import { AdminAnomalyBoard } from "@/components/admin-audit";
+import { AdminTallyWorkspace } from "@/components/admin-tally";
+import { PublicResults } from "@/components/public-results";
+import { QuorumSelect } from "@/components/quorum-select";
 
 type Role = "student" | "admin";
-type NominationStatus = "none" | "pending" | "approved" | "rejected" | "withdrawn";
-type VoteStage = "intro" | "liveness" | "candidates" | "review" | "secure" | "receipt";
 
-type DemoState = {
-  nominationStatus: NominationStatus;
-  nominationStatement: string;
-  nominationManifesto: string;
-  nominatedAt?: string;
-  selectedCandidate: string;
-  voteStage: VoteStage;
-  livenessPassed: boolean;
-  livenessProof: string;
-  voted: boolean;
-  receipt: string;
-  resultPublished: boolean;
-  anomalyQuarantined: boolean;
-  anomalyReviewReason: string;
-  announcement: string;
-  simOffsetDays: number;
-  createdBallot: string;
+const INITIAL_VOTING_STATE: VotingState = {
+  selectedCandidate: "",
+  voteStage: "intro",
+  livenessPassed: false,
+  livenessProof: "",
+  voted: false,
+  votedBallotId: "",
+  receipt: "",
+  recordedAt: "",
 };
-
-const INITIAL_STATE: DemoState = {
-  nominationStatus: "none", nominationStatement: "", nominationManifesto: "",
-  selectedCandidate: "", voteStage: "intro", livenessPassed: false, livenessProof: "", voted: false,
-  receipt: "", resultPublished: false, anomalyQuarantined: true,
-  anomalyReviewReason: "", announcement: "", simOffsetDays: 0, createdBallot: "",
-};
-
-const RECEIPT_SEED = "7d8f5e4c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e";
-
-type CandidateProfile = {
-  id: string;
-  initials: string;
-  name: string;
-  year: string;
-  statement: string;
-  color: string;
-  highlights: string[];
-  manifesto: string;
-  topics: Record<string, string>;
-  photo?: { ballotId: string; candidateId: string };
-  isSelf?: boolean;
-};
-
-const candidates: CandidateProfile[] = [
-  {
-    id: "maya", initials: "MK", name: "Maya Khalil", year: "Political Science · Year 3",
-    statement: "A council that reports back, not just votes behind closed doors.", color: "#6f3552",
-    highlights: ["Publish monthly council decisions and attendance", "Create a student emergency support fund", "Hold open office hours in every faculty"],
-    manifesto: "Student government should be visible between elections. I will publish a monthly record of decisions, budgets and attendance, establish an emergency support fund with clear criteria, and rotate open office hours across every faculty so students can raise concerns directly.",
-    topics: { Transparency: "Monthly public decisions and attendance", Welfare: "Emergency support fund", Access: "Faculty-based open office hours", Sustainability: "Not addressed" },
-  },
-  {
-    id: "omar", initials: "OH", name: "Omar Haddad", year: "Engineering · Year 4",
-    statement: "Practical services that make each day on campus work better.", color: "#396257",
-    highlights: ["Extend library and shuttle hours", "Launch a unified campus service tracker", "Fund student-led sustainability projects"],
-    manifesto: "My platform focuses on daily campus services: later library and shuttle schedules during peak weeks, one tracker for reporting maintenance and transport issues, and micro-grants for student teams that reduce waste and energy use on campus.",
-    topics: { Transparency: "Service issue tracker", Welfare: "Extended library and shuttle hours", Access: "Cross-campus transport coverage", Sustainability: "Student sustainability micro-grants" },
-  },
-  {
-    id: "lina", initials: "LS", name: "Lina Saad", year: "Computer Science · Year 3",
-    statement: "A connected campus where every group can participate.", color: "#5d4d8f",
-    highlights: ["Create a shared calendar for clubs and faculties", "Introduce accessible event standards", "Publish a semester participation report"],
-    manifesto: "Campus life should be easier to discover and join. I will create a shared activities calendar, work with clubs on accessible event standards, and publish semester participation reports so funding reaches communities that are being left out.",
-    topics: { Transparency: "Semester participation report", Welfare: "Not addressed", Access: "Accessible event standards", Sustainability: "Not addressed" },
-  },
-  {
-    id: "tarek", initials: "TN", name: "Tarek Nassar", year: "Business · Year 2",
-    statement: "Student opportunities should be clear, funded and measurable.", color: "#9a6234",
-    highlights: ["Publish club funding criteria before applications", "Build an internship partner directory", "Introduce quarterly budget checkpoints"],
-    manifesto: "I will make opportunity funding predictable by publishing club criteria before applications open, create a verified directory of internship partners, and introduce quarterly budget checkpoints with plain-language summaries for students.",
-    topics: { Transparency: "Quarterly budget checkpoints", Welfare: "Internship partner directory", Access: "Published club funding criteria", Sustainability: "Not addressed" },
-  },
-];
-
-const ballots = [
-  { phase: "Voting open", tone: "green", title: "Student Government Executive Board Election 2026", scope: "Every eligible student", date: "Closes Sep 25 · 11:00 PM", path: "/student/vote" },
-  { phase: "Nominations open", tone: "violet", title: "Computer Science Department Representative", scope: "Department · Computer Science", date: "Closes Sep 21 · 6:00 PM", path: "/student/nominations" },
-  { phase: "Upcoming", tone: "gold", title: "Senior Class Committee 2026", scope: "Class year · Year 4", date: "Opens Sep 21 · 9:00 AM", path: "/student/results" },
-];
 
 const fieldClass = "focus-ring mt-2 w-full rounded-xl border border-[#d8cebd] bg-white px-4 py-3 text-[#211a22] placeholder:text-[#9a9188]";
 const primaryButton = "focus-ring inline-flex items-center justify-center gap-2 rounded-xl bg-[#8f2f43] px-5 py-3 font-bold text-white transition hover:bg-[#742437] disabled:cursor-not-allowed disabled:opacity-50";
-const secondaryButton = "focus-ring inline-flex items-center justify-center gap-2 rounded-xl border border-[#cbbfae] bg-white px-5 py-3 font-semibold text-[#352b34] transition hover:bg-[#f7f2e9] disabled:opacity-50";
-const cardClass = "rounded-[22px] border border-[#ded5c5] bg-white shadow-[0_8px_30px_rgb(58_41_48/5%)]";
 
 function initialsFor(name: string): string {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase();
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
 }
 
-function useDemoState() {
-  const [state, setState] = useState<DemoState>(INITIAL_STATE);
+function useVotingState() {
+  const [state, setState] = useState<VotingState>(INITIAL_VOTING_STATE);
   const [hydrated, setHydrated] = useState(false);
+
   useEffect(() => {
-    try { const saved = localStorage.getItem("quorum-demo-state"); if (saved) { const parsed={ ...INITIAL_STATE, ...JSON.parse(saved) } as DemoState; setState({ ...parsed, livenessPassed:false, livenessProof:"", voteStage:parsed.voted?"receipt":"intro" }); } } catch {}
+    try {
+      const saved = localStorage.getItem("quorum-voting-state");
+      if (saved) {
+        const parsed = { ...INITIAL_VOTING_STATE, ...JSON.parse(saved) } as VotingState;
+        setState({
+          ...parsed,
+          livenessPassed: false,
+          livenessProof: "",
+          voteStage: parsed.voted && parsed.receipt ? "receipt" : "intro",
+        });
+      }
+    } catch {
+      localStorage.removeItem("quorum-voting-state");
+    }
     setHydrated(true);
   }, []);
-  useEffect(() => { if (hydrated) localStorage.setItem("quorum-demo-state", JSON.stringify({ ...state, livenessPassed:false, livenessProof:"", voteStage:state.voted?"receipt":"intro" })); }, [state, hydrated]);
-  const update = (patch: Partial<DemoState>) => setState(previous => ({ ...previous, ...patch }));
-  const reset = () => { setState(INITIAL_STATE); localStorage.removeItem("quorum-demo-state"); };
-  return { state, update, reset, hydrated };
+
+  useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(
+      "quorum-voting-state",
+      JSON.stringify({
+        ...state,
+        livenessPassed: false,
+        livenessProof: "",
+        voteStage: state.voted && state.receipt ? "receipt" : "intro",
+      }),
+    );
+  }, [state, hydrated]);
+
+  const update = useCallback((patch: Partial<VotingState>) => {
+    setState((previous) => ({ ...previous, ...patch }));
+  }, []);
+
+  return { state, update, hydrated };
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
-  return <div className="flex items-center gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl border border-[#c49a4a]/50 bg-[#2b1a29] text-[#d9ad5f]"><Vote size={20} /></div>{!compact && <div><div className="display text-xl font-bold text-[#fff7ef]">Quorum</div><div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#a99daf]">Campus Election Authority</div></div>}</div>;
+  return (
+    <div className="flex items-center gap-3">
+      <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-[#c49a4a]/50 bg-[#2b1a29] text-[#d9ad5f]"><Vote size={20} /></div>
+      {!compact && <div><div className="display text-xl font-bold text-[#fff7ef]">Quorum</div><div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#a99daf]">Campus Election Authority</div></div>}
+    </div>
+  );
 }
 
-function StatusBadge({ children, tone = "green" }: { children: React.ReactNode; tone?: "green" | "violet" | "gold" | "red" | "slate" }) {
-  const tones = { green: "bg-[#e0f4ed] text-[#17745a]", violet: "bg-[#ece9ff] text-[#6550b5]", gold: "bg-[#fbefce] text-[#8f671d]", red: "bg-[#fde8e6] text-[#a4382e]", slate: "bg-[#ece9e5] text-[#5e5752]" };
-  return <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${tones[tone]}`}>{children}</span>;
+function PageHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
+  return (
+    <header>
+      <p className="text-xs font-bold uppercase tracking-[.2em] text-[#8f2f43]">{eyebrow}</p>
+      <h1 className="display mt-2 text-4xl font-bold sm:text-5xl">{title}</h1>
+      <p className="mt-2 max-w-3xl text-[#6e665f]">{description}</p>
+    </header>
+  );
 }
 
-function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
-  return <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-[#8f2f43]">{eyebrow}</p><h1 className="display mt-2 text-4xl font-bold sm:text-5xl">{title}</h1><p className="mt-2 max-w-3xl text-[#6e665f]">{description}</p></div>{action}</header>;
-}
-
-function Login({ onAuthenticated }: {
-  onAuthenticated: (session: QuorumSession) => void;
-}) {
+function Login({ onAuthenticated }: { onAuthenticated: (session: QuorumSession) => void }) {
   const router = useRouter();
-  const [id, setId] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
   const signIn = async () => {
-    if (!id.trim() || !password) { setError("Enter your university ID or email and password."); return; }
+    if (!identifier.trim() || !password) {
+      setError("Enter your university ID or email and password.");
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
-      onAuthenticated(await login(id.trim(), password));
+      onAuthenticated(await login(identifier.trim(), password));
     } catch (failure) {
       setError(failure instanceof AuthenticationError ? failure.message : "Sign-in could not be completed.");
     } finally {
       setSubmitting(false);
     }
   };
-  return <main className="fine-grid min-h-screen bg-[#15101c] p-4 text-white sm:grid sm:place-items-center sm:p-6">
-    <div className="mx-auto grid min-h-[calc(100vh-32px)] w-full max-w-5xl overflow-hidden rounded-[30px] border border-white/10 bg-[#1b1422] shadow-2xl sm:min-h-0 sm:grid-cols-[1.05fr_.95fr]">
-      <section className="relative flex min-h-[350px] flex-col justify-between overflow-hidden p-7 sm:min-h-[680px] sm:p-12"><div className="absolute -right-24 top-36 size-80 rounded-full bg-[#8f2f43]/20 blur-3xl"/><Brand/><div className="relative max-w-lg"><p className="mb-5 text-xs font-semibold uppercase tracking-[.22em] text-[#d9ad5f]">Private by design · accountable by proof</p><h1 className="display text-4xl font-semibold leading-[1.08] text-[#fff7ef] sm:text-6xl">Every campus voice, counted without being traced.</h1><p className="mt-6 max-w-md leading-7 text-[#bdb3c2]">Nominate, compare, vote and verify through one trusted election workspace.</p></div><div className="relative grid grid-cols-3 gap-3 border-t border-white/10 pt-6 text-sm text-[#bdb3c2]"><div><strong className="block text-xl text-white">3</strong>Active ballots</div><div><strong className="block text-xl text-white">4</strong>Verified votes</div><div><strong className="block text-xl text-white">0</strong>Identity links</div></div></section>
-      <section className="paper-noise flex flex-col justify-center bg-[#fbf8f1] p-7 text-[#211a22] sm:p-12"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#8f2f43]">University access</p><h2 className="display mt-3 text-4xl font-bold">Welcome back</h2><p className="mt-2 text-[#6e665f]">Use your registered university credentials.</p><form onSubmit={event=>{event.preventDefault();void signIn();}} className="mt-8 space-y-5"><label className="block text-sm font-semibold">University ID or email<input autoComplete="username" value={id} onChange={e=>setId(e.target.value)} className={fieldClass}/></label><label className="block text-sm font-semibold">Password<input autoComplete="current-password" type="password" value={password} onChange={e=>setPassword(e.target.value)} className={fieldClass}/></label>{error&&<p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}<button disabled={submitting} type="submit" className={`${primaryButton} w-full justify-between`}>{submitting?"Signing in…":"Sign in"} <ArrowRight size={19}/></button></form><div className="mt-8 flex flex-wrap gap-4 text-sm font-semibold text-[#8f2f43]"><button onClick={()=>router.push("/public/verify")}>Verify a receipt</button><button onClick={()=>router.push("/public/results")}>View public results</button></div></section>
-    </div>
-  </main>;
+
+  return (
+    <main className="fine-grid min-h-screen bg-[#15101c] p-4 text-white sm:grid sm:place-items-center sm:p-6">
+      <div className="mx-auto grid min-h-[calc(100vh-32px)] w-full max-w-5xl overflow-hidden rounded-[30px] border border-white/10 bg-[#1b1422] shadow-2xl sm:min-h-0 sm:grid-cols-[1.05fr_.95fr]">
+        <section className="relative flex min-h-[350px] flex-col justify-between overflow-hidden p-7 sm:min-h-[680px] sm:p-12">
+          <div className="absolute -right-24 top-36 size-80 rounded-full bg-[#8f2f43]/20 blur-3xl" />
+          <Brand />
+          <div className="relative max-w-lg">
+            <p className="mb-5 text-xs font-semibold uppercase tracking-[.22em] text-[#d9ad5f]">Private by design · accountable by proof</p>
+            <h1 className="display text-4xl font-semibold leading-[1.08] text-[#fff7ef] sm:text-6xl">Every campus voice, counted with privacy and verifiable proof.</h1>
+            <p className="mt-6 max-w-md leading-7 text-[#bdb3c2]">Nominate, compare, vote and verify through one trusted election workspace.</p>
+          </div>
+          <div className="relative grid grid-cols-3 gap-3 border-t border-white/10 pt-6 text-sm text-[#bdb3c2]">
+            <div><ShieldCheck className="mb-2 text-[#7bdbc2]" size={20} /><strong className="block text-white">Eligibility</strong>Confirmed before voting</div>
+            <div><LockKeyhole className="mb-2 text-[#d9ad5f]" size={20} /><strong className="block text-white">Ballot privacy</strong>Identity separated</div>
+            <div><ClipboardCheck className="mb-2 text-[#b6a4e9]" size={20} /><strong className="block text-white">Receipt</strong>Publicly verifiable</div>
+          </div>
+        </section>
+        <section className="paper-noise flex flex-col justify-center bg-[#fbf8f1] p-7 text-[#211a22] sm:p-12">
+          <p className="text-xs font-bold uppercase tracking-[.2em] text-[#8f2f43]">University access</p>
+          <h2 className="display mt-3 text-4xl font-bold">Welcome back</h2>
+          <p className="mt-2 text-[#6e665f]">Use your registered university credentials.</p>
+          <form onSubmit={(event) => { event.preventDefault(); void signIn(); }} className="mt-8 space-y-5">
+            <label className="block text-sm font-semibold">University ID or email<input autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} className={fieldClass} /></label>
+            <label className="block text-sm font-semibold">Password<input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} className={fieldClass} /></label>
+            {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
+            <button disabled={submitting} type="submit" className={`${primaryButton} w-full justify-between`}>{submitting ? "Signing in…" : "Sign in"} <ArrowRight size={19} /></button>
+          </form>
+          <div className="mt-8 flex flex-wrap gap-4 text-sm font-semibold text-[#8f2f43]">
+            <button onClick={() => router.push("/public/verify")}>Verify a receipt</button>
+            <button onClick={() => router.push("/public/results")}>View public results</button>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
 }
 
 const studentNav = [
-  ["Dashboard", LayoutDashboard, "/student/dashboard"], ["Nominate", Megaphone, "/student/nominations"],
-  ["Vote", Vote, "/student/vote"], ["Public ledger", ClipboardCheck, "/student/ledger"], ["Results", BarChart3, "/student/results"],
-] as const;
-const adminNav = [
-  ["Overview", LayoutDashboard, "/admin/overview"], ["Post a ballot", Plus, "/admin/ballots/new"],
-  ["Manage ballots", ListChecks, "/admin/ballots"], ["Anomaly console", ShieldCheck, "/admin/anomalies"],
-  ["Results & publish", BarChart3, "/admin/results"], ["Public ledger", ClipboardCheck, "/admin/ledger"],
+  ["Dashboard", LayoutDashboard, "/student/dashboard"],
+  ["Nominate", Megaphone, "/student/nominations"],
+  ["Vote", Vote, "/student/vote"],
+  ["Public ledger", ClipboardCheck, "/student/ledger"],
+  ["Results", BarChart3, "/student/results"],
 ] as const;
 
-function Shell({ role, user, children, reset, onLogout }: { role: Role; user?: AuthenticatedStudent|AuthenticatedAdministrator; children: React.ReactNode; reset: () => void; onLogout: () => void }) {
+const adminNav = [
+  ["Overview", LayoutDashboard, "/admin/overview"],
+  ["Post a ballot", Plus, "/admin/ballots/new"],
+  ["Manage ballots", ListChecks, "/admin/ballots"],
+  ["Anomaly console", ShieldCheck, "/admin/anomalies"],
+  ["Results & publish", BarChart3, "/admin/results"],
+  ["Public ledger", ClipboardCheck, "/admin/ledger"],
+] as const;
+
+function Shell({ role, user, children, onLogout }: { role: Role; user?: AuthenticatedStudent | AuthenticatedAdministrator; children: React.ReactNode; onLogout: () => void }) {
   const router = useRouter();
   const pathname = usePathname();
   const nav = role === "student" ? studentNav : adminNav;
   const displayName = user?.fullName ?? "Election Administrator";
-  const profileDetail = user&&"universityId" in user ? `ID #${user.universityId} · ${user.department}` : user?.email??"Election Supervisor";
-  return <div className="min-h-screen bg-[#f5f1e8] text-[#211a22] lg:flex"><aside className="hidden min-h-screen w-[270px] shrink-0 flex-col bg-[#17111f] p-6 text-[#bfb4c4] lg:flex"><Brand/><div className={`mt-10 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest ${role==="student"?"bg-[#123c38] text-[#7bdbc2]":"bg-[#49351d] text-[#ecc56e]"}`}>{role} access</div><nav className="mt-7 space-y-2">{nav.map(([label,Icon,path])=><button key={path} onClick={()=>router.push(path)} className={`focus-ring flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${pathname===path?"bg-[#3c2030] text-white shadow-[inset_3px_0_0_#c49a4a]":"hover:bg-white/5 hover:text-white"}`}><Icon size={19}/>{label}</button>)}</nav><div className="mt-auto border-t border-white/10 pt-6"><div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-full bg-[#9d5c37] font-bold text-white">{initialsFor(displayName)}</div><div><div className="font-semibold text-white">{displayName}</div><div className="text-xs">{profileDetail}</div></div></div><button onClick={onLogout} className="mt-5 flex items-center gap-2 text-sm hover:text-white"><LogOut size={16}/>Sign out</button></div></aside>
-    <div className="min-w-0 flex-1"><div className="sticky top-0 z-30 flex items-center justify-between border-b border-[#ded5c5] bg-[#f8f4ec]/95 px-4 py-3 backdrop-blur lg:hidden"><Brand compact/><div className="flex gap-2"><select aria-label="Navigate" value={pathname} onChange={e=>router.push(e.target.value)} className="rounded-lg border border-[#cbbfae] bg-white px-3 py-2 text-sm">{nav.map(([label,,path])=><option key={path} value={path}>{label}</option>)}</select><button aria-label="Sign out" onClick={onLogout} className="rounded-lg border border-[#cbbfae] bg-white p-2"><LogOut size={18}/></button></div></div><main className="p-5 sm:p-8 lg:p-12"><div className="mx-auto max-w-6xl">{children}<footer className="mt-12 border-t border-[#d8cebd] py-6 text-xs text-[#756d66]">Quorum · Campus Election Authority</footer></div></main></div>
-  </div>;
+  const currentPage = nav.find(([, , path]) => path === pathname)?.[0] ?? "Quorum";
+
+  return (
+    <div className="min-h-screen bg-[#f5f1e8] text-[#211a22] lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-[270px] shrink-0 flex-col bg-[#17111f] p-6 text-[#bfb4c4] lg:flex">
+        <Brand />
+        <div className={`mt-10 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest ${role === "student" ? "bg-[#123c38] text-[#7bdbc2]" : "bg-[#49351d] text-[#ecc56e]"}`}>{role} access</div>
+        <nav className="mt-7 space-y-2">
+          {nav.map(([label, Icon, path]) => (
+            <button key={path} onClick={() => router.push(path)} className={`focus-ring flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-medium transition ${pathname === path ? "bg-[#3c2030] text-white shadow-[inset_3px_0_0_#c49a4a]" : "hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{label}</button>
+          ))}
+        </nav>
+        <div className="mt-auto border-t border-white/10 pt-6">
+          <div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-full bg-[#9d5c37] font-bold text-white">{initialsFor(displayName)}</div><div className="font-semibold text-white">{displayName}</div></div>
+          <button onClick={onLogout} className="mt-5 flex items-center gap-2 text-sm hover:text-white"><LogOut size={16} />Sign out</button>
+        </div>
+      </aside>
+      <div className="min-w-0 flex-1">
+        <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between border-b border-[#ded5c5] bg-[#f8f4ec]/95 px-4 py-3 shadow-[0_1px_0_rgb(255_255_255/70%)] backdrop-blur sm:px-8">
+          <div className="lg:hidden"><Brand compact /></div>
+          <div className="hidden lg:block"><p className="text-[11px] font-bold uppercase tracking-[.18em] text-[#8f2f43]">{role === "student" ? "Student workspace" : "Administration"}</p><p className="font-semibold text-[#352b34]">{currentPage}</p></div>
+          <div className="flex items-center gap-2 lg:hidden"><QuorumSelect compact ariaLabel="Navigate" value={pathname} onValueChange={value=>router.push(value)} options={nav.map(([label,,path])=>({value:path,label}))}/><button aria-label="Sign out" onClick={onLogout} className="grid size-10 place-items-center rounded-xl border border-[#cbbfae] bg-white text-[#493d45] shadow-sm transition hover:border-[#8f2f43] hover:text-[#8f2f43]"><LogOut size={18} /></button></div>
+          <div className="hidden items-center gap-2 text-sm text-[#6e665f] lg:flex"><ShieldCheck size={17} className="text-[#17745a]"/><span>Secure {role === "student" ? "student" : "administrator"} session</span></div>
+        </header>
+        <main className="p-5 sm:p-8 lg:p-12"><div className="mx-auto max-w-6xl">{children}<footer className="mt-12 border-t border-[#d8cebd] py-6 text-xs text-[#756d66]">Quorum · Campus Election Authority</footer></div></main>
+      </div>
+    </div>
+  );
 }
 
-function StudentDashboard({ state, user }: { state: DemoState; user: AuthenticatedStudent }) {
-  const router=useRouter();
-  return <><PageHeader eyebrow="Saturday · 19 September" title={`Good morning, ${user.fullName.split(" ")[0]}.`} description="Your eligible elections, current deadlines and next actions are gathered here." action={<div className="hidden rounded-2xl border border-[#ded5c5] bg-white px-4 py-3 text-sm sm:flex sm:items-center sm:gap-3"><ShieldCheck className="text-[#17745a]"/><div><strong className="block">Identity verified</strong><span className="text-[#6e665f]">University account confirmed</span></div></div>}/><section className="mt-8 rounded-2xl border border-[#e3ca92] bg-[#fff6d9] p-4 sm:flex sm:items-center sm:justify-between"><div className="flex items-start gap-3"><Megaphone className="mt-0.5 text-[#9a6818]" size={19}/><div><strong>{state.announcement||"Nominations close soon"}</strong><p className="text-sm text-[#6e5a34]">Computer Science Department Representative · 2 days remaining</p></div></div><button onClick={()=>router.push("/student/nominations")} className="mt-3 text-sm font-bold text-[#8f2f43] sm:mt-0">Review opportunity →</button></section><div className="mt-8 grid gap-5">{ballots.map((b,i)=><article key={b.title} className={`${cardClass} p-5 transition hover:-translate-y-0.5 hover:shadow-xl sm:flex sm:items-center sm:justify-between sm:p-6`}><div><StatusBadge tone={b.tone as "green"|"violet"|"gold"}>{i===0&&state.voted?"Vote recorded":b.phase}</StatusBadge><h2 className="display mt-3 text-2xl font-bold">{b.title}</h2><p className="mt-1 text-sm text-[#6e665f]">{b.scope}</p><p className="mt-3 flex items-center gap-2 text-sm font-medium"><CalendarDays size={16} className="text-[#8f2f43]"/>{b.date}</p></div><button onClick={()=>router.push(b.path)} className={`${i<2?primaryButton:secondaryButton} mt-5 sm:mt-0`}>{i===0?(state.voted?"View receipt":"Enter voting booth"):i===1?(state.nominationStatus==="none"?"Nominate yourself":"Track nomination"):"View schedule"}<ArrowRight size={17}/></button></article>)}</div><section className="mt-8 grid gap-4 sm:grid-cols-3"><div className="rounded-2xl bg-[#1b1422] p-5 text-white"><Check className="text-[#69c6aa]"/><strong className="mt-8 block text-2xl">{state.voted?"1 of 3":"0 of 3"}</strong><span className="text-sm text-[#bdb3c2]">Elections completed</span></div><div className={`${cardClass} p-5`}><LockKeyhole className="text-[#8f2f43]"/><strong className="mt-8 block text-2xl">Private ballot</strong><span className="text-sm text-[#6e665f]">Identity is separated before your choice is submitted</span></div><div className={`${cardClass} p-5`}><ClipboardCheck className="text-[#a27022]"/><strong className="mt-8 block text-2xl">Public proof</strong><span className="text-sm text-[#6e665f]">Your receipt can be checked after submission</span></div></section></>;
+function Ledger({ initialReceipt = "", admin = false }: { initialReceipt?: string; admin?: boolean }) {
+  return (
+    <>
+      <PageHeader
+        eyebrow={admin ? "Administrative verification" : "Public verification"}
+        title="Verify an anonymous receipt"
+        description="Paste a receipt to confirm that its anonymous ballot was recorded. Verification does not reveal the voter or candidate choice."
+      />
+      <ReceiptLookup initialReceipt={initialReceipt} />
+    </>
+  );
 }
 
-function Nominations({ state, update, user }: { state: DemoState; update: (p: Partial<DemoState>)=>void; user: AuthenticatedStudent }) {
-  const [statement,setStatement]=useState(state.nominationStatement); const [manifesto,setManifesto]=useState(state.nominationManifesto); const [agree,setAgree]=useState(false); const [error,setError]=useState("");
-  const submit=()=>{if(statement.trim().length<20||manifesto.trim().length<100||!agree){setError("Add a complete statement, a manifesto of at least 100 characters, and confirm the declaration.");return;} update({nominationStatus:"pending",nominationStatement:statement,nominationManifesto:manifesto,nominatedAt:"Sep 19, 2026 · 10:42 AM"});};
-  if(state.nominationStatus!=="none") return <><PageHeader eyebrow="Nomination centre" title="Your nomination" description="Track the review status for this election cycle."/><div className={`${cardClass} mt-8 overflow-hidden`}><div className="bg-[#1b1422] p-6 text-white"><div className="flex items-center justify-between gap-4"><div><StatusBadge tone={state.nominationStatus==="approved"?"green":state.nominationStatus==="rejected"?"red":"gold"}>{state.nominationStatus[0].toUpperCase()+state.nominationStatus.slice(1)}</StatusBadge><h2 className="display mt-4 text-3xl font-bold">Computer Science Department Representative</h2><p className="mt-2 text-[#bdb3c2]">Submitted {state.nominatedAt}</p></div><FileCheck2 size={44} className="text-[#d9ad5f]"/></div></div><div className="grid gap-7 p-6 lg:grid-cols-[1fr_.65fr]"><div><h3 className="font-bold">Candidacy statement</h3><p className="mt-2 text-[#5f5650]">{state.nominationStatement}</p><h3 className="mt-6 font-bold">Manifesto</h3><p className="mt-2 whitespace-pre-line leading-7 text-[#5f5650]">{state.nominationManifesto}</p></div><div className="rounded-2xl bg-[#f4efe6] p-5"><h3 className="font-bold">Review timeline</h3><div className="mt-5 space-y-5 text-sm"><div className="flex gap-3"><CheckCircle2 className="text-[#17745a]" size={19}/><div><strong>Submitted</strong><p className="text-[#6e665f]">Eligibility confirmed</p></div></div><div className="flex gap-3"><Clock3 className="text-[#a27022]" size={19}/><div><strong>Administrative review</strong><p className="text-[#6e665f]">Usually within one working day</p></div></div><div className="flex gap-3 opacity-50"><Sparkles size={19}/><div><strong>Candidate profile published</strong><p>After approval</p></div></div></div>{state.nominationStatus==="pending"&&<button onClick={()=>update({nominationStatus:"withdrawn"})} className="mt-7 text-sm font-bold text-[#a4382e]">Withdraw nomination</button>}</div></div></div></>;
-  return <><PageHeader eyebrow="Nomination centre" title="Nominate yourself" description="You can stand in one ballot per election cycle. Your official profile details are attached automatically."/><div className="mt-8 grid gap-6 lg:grid-cols-[.72fr_1.28fr]"><aside className={`${cardClass} h-fit p-6`}><div className="flex items-center gap-4"><div className="grid size-16 place-items-center rounded-2xl bg-[#8f2f43] text-xl font-bold text-white">{initialsFor(user.fullName)}</div><div><h2 className="display text-2xl font-bold">{user.fullName}</h2><p className="text-sm text-[#6e665f]">ID #{user.universityId}</p></div></div><dl className="mt-6 grid gap-4 text-sm"><div><dt className="text-[#837a72]">Department</dt><dd className="font-semibold">{user.department}</dd></div><div><dt className="text-[#837a72]">Class year</dt><dd className="font-semibold">Year {user.classYear}</dd></div><div><dt className="text-[#837a72]">Registered clubs</dt><dd className="font-semibold">{user.clubMemberships.join(" · ") || "None registered"}</dd></div></dl><div className="mt-6 flex gap-2 rounded-xl bg-[#e5f4ef] p-3 text-sm text-[#17604c]"><UserCheck className="shrink-0" size={18}/>Eligible for this ballot</div></aside><form onSubmit={e=>{e.preventDefault();submit();}} className={`${cardClass} p-6 sm:p-8`}><div className="flex items-start justify-between gap-4"><div><StatusBadge tone="violet">Nominations open</StatusBadge><h2 className="display mt-3 text-3xl font-bold">Computer Science Department Representative</h2><p className="mt-1 text-sm text-[#6e665f]">Closes Sep 21 · 6:00 PM</p></div><Megaphone className="text-[#8f2f43]"/></div><label className="mt-7 block font-semibold">Candidacy statement <span className="font-normal text-[#766e67]">({statement.length}/140)</span><input maxLength={140} value={statement} onChange={e=>setStatement(e.target.value)} placeholder="One clear sentence describing your candidacy" className={fieldClass}/></label><label className="mt-5 block font-semibold">Manifesto <span className="font-normal text-[#766e67]">({manifesto.length}/2000)</span><textarea maxLength={2000} rows={9} value={manifesto} onChange={e=>setManifesto(e.target.value)} placeholder="Explain your priorities, commitments and how you will report progress." className={fieldClass}/></label><label className="mt-5 flex items-start gap-3 rounded-xl bg-[#f5f1e8] p-4 text-sm"><input type="checkbox" checked={agree} onChange={e=>setAgree(e.target.checked)} className="mt-1 size-4 accent-[#8f2f43]"/><span>I confirm that this manifesto is my own submission and may be published if approved.</span></label>{error&&<p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}<div className="mt-6 flex justify-end"><button type="submit" className={primaryButton}>Review and submit <ArrowRight size={17}/> </button></div></form></div></>;
+function NotFound() {
+  const router = useRouter();
+  return (
+    <div className="grid min-h-screen place-items-center bg-[#17111f] p-6 text-white">
+      <div className="max-w-lg text-center">
+        <div className="mx-auto grid size-16 place-items-center rounded-2xl border border-[#c49a4a]/40 text-[#d9ad5f]"><AlertTriangle /></div>
+        <p className="mt-6 text-xs font-bold uppercase tracking-widest text-[#d9ad5f]">Page not found</p>
+        <h1 className="display mt-3 text-5xl font-bold">This page is unavailable.</h1>
+        <p className="mt-4 text-[#bdb3c2]">Return to sign in or use the public verification tools.</p>
+        <button onClick={() => router.push("/")} className={`${primaryButton} mt-7`}>Return to sign in</button>
+      </div>
+    </div>
+  );
 }
 
-function CandidateDialog({ candidate }: { candidate: CandidateProfile }) {
-  return <Dialog><DialogTrigger asChild><button className="text-sm font-bold text-[#8f2f43]">Read full manifesto</button></DialogTrigger><DialogContent className="max-h-[90vh] overflow-y-auto bg-[#fbf8f1] sm:max-w-2xl"><DialogHeader><DialogTitle className="display text-3xl">{candidate.name}</DialogTitle><DialogDescription>{candidate.year}</DialogDescription></DialogHeader><blockquote className="rounded-2xl bg-[#1b1422] p-5 text-lg text-white">“{candidate.statement}”</blockquote><div><h3 className="font-bold">Manifesto highlights</h3><ul className="mt-3 space-y-3">{candidate.highlights.map(h=><li key={h} className="flex gap-3"><CheckCircle2 size={18} className="mt-1 shrink-0 text-[#17745a]"/><span>{h}</span></li>)}</ul></div><div><h3 className="font-bold">Full manifesto</h3><p className="mt-2 leading-7 text-[#5f5650]">{candidate.manifesto}</p></div><DialogFooter showCloseButton/></DialogContent></Dialog>;
+function PublicPage({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const navClass = (path: string) => `rounded-lg px-3 py-2 text-sm font-semibold transition ${pathname === path ? "bg-white/12 text-white" : "text-[#d8cedc] hover:bg-white/10 hover:text-white"}`;
+  return (
+    <div className="flex min-h-screen flex-col bg-[#f5f1e8]">
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#17111f]/96 px-5 py-4 text-white shadow-lg backdrop-blur"><div className="mx-auto flex max-w-6xl items-center justify-between"><Brand /><nav aria-label="Public navigation" className="flex gap-1"><button aria-current={pathname==="/public/verify"?"page":undefined} onClick={() => router.push("/public/verify")} className={navClass("/public/verify")}>Verify</button><button aria-current={pathname==="/public/results"?"page":undefined} onClick={() => router.push("/public/results")} className={navClass("/public/results")}>Results</button><button onClick={() => router.push("/")} className="ml-1 rounded-lg border border-white/25 px-3 py-2 text-sm font-semibold transition hover:border-[#d9ad5f] hover:bg-white/10">Sign in</button></nav></div></header>
+      <main className="flex-1 p-5 sm:p-8 lg:p-12"><div className="mx-auto max-w-6xl">{children}</div></main>
+      <footer className="border-t border-[#d8cebd] px-5 py-6 text-center text-xs text-[#756d66]">Quorum · Campus Election Authority</footer>
+    </div>
+  );
 }
 
-function CandidateAvatar({ candidate, accessToken }: { candidate: CandidateProfile; accessToken: string }) {
-  const [source,setSource]=useState("");
-  useEffect(()=>{let active=true;let objectUrl="";if(!candidate.photo)return;void loadCandidatePhoto(candidate.photo.ballotId,candidate.photo.candidateId,accessToken).then(url=>{objectUrl=url;if(active)setSource(url);else URL.revokeObjectURL(url);}).catch(()=>{});return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl);};},[candidate.photo,accessToken]);
-  if(source)return <img src={source} alt={`${candidate.name} profile`} className="size-14 rounded-2xl object-cover"/>;
-  return <div className="grid size-14 place-items-center rounded-2xl text-lg font-bold text-white" style={{background:candidate.color}}>{candidate.initials}</div>;
-}
+type ToolContext = {
+  registerTool: (tool: Record<string, unknown>, options?: { signal?: AbortSignal }) => void | Promise<void>;
+};
 
-function ComparisonDialog({ ids, candidateOptions = candidates }: { ids: string[]; candidateOptions?: CandidateProfile[] }) {
-  const chosen = candidateOptions.filter(c=>ids.includes(c.id)); const topics=Array.from(new Set(chosen.flatMap(candidate=>Object.keys(candidate.topics))));
-  return <Dialog><DialogTrigger asChild><button disabled={ids.length<2} className={secondaryButton}><Scale size={17}/>Compare {ids.length||""} candidates</button></DialogTrigger><DialogContent className="max-h-[92vh] overflow-auto bg-[#fbf8f1] sm:max-w-5xl"><DialogHeader><DialogTitle className="display text-3xl">Compare priorities</DialogTitle><DialogDescription>Manifesto positions aligned by shared topics. “Not addressed” means the submitted manifesto did not cover that topic.</DialogDescription></DialogHeader><div className="min-w-[700px] overflow-hidden rounded-2xl border border-[#d8cebd]"><div className="grid bg-[#1b1422] text-white" style={{gridTemplateColumns:`170px repeat(${chosen.length}, minmax(180px,1fr))`}}><div className="p-4 font-bold">Topic</div>{chosen.map(c=><div key={c.id} className="border-l border-white/10 p-4"><strong>{c.name}</strong><span className="block text-xs text-[#bdb3c2]">{c.year}</span></div>)}</div>{topics.map((topic,i)=><div key={topic} className={`grid ${i%2?"bg-[#f4efe6]":"bg-white"}`} style={{gridTemplateColumns:`170px repeat(${chosen.length}, minmax(180px,1fr))`}}><div className="p-4 font-bold">{topic}</div>{chosen.map(c=><div key={c.id} className="border-l border-[#ded5c5] p-4 text-sm leading-6">{c.topics[topic as keyof typeof c.topics]}</div>)}</div>)}</div></DialogContent></Dialog>;
-}
+export function QuorumApp() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { state, update, hydrated } = useVotingState();
+  const [session, setSession] = useState<QuorumSession | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
-function VoteFlow({ state, update, accessToken, candidateOptions = candidates, ballotId, ballotTitle = "Student Government Executive Board", ballotPhase = "VOTING_OPEN", closesAt }: { state: DemoState; update: (p: Partial<DemoState>)=>void; accessToken:string; candidateOptions?: CandidateProfile[]; ballotId?: string; ballotTitle?: string; ballotPhase?: PersistedBallotPhase; closesAt?: string }) {
-  const [compare,setCompare]=useState<string[]>([]); const [secureProgress,setSecureProgress]=useState(0); const [status,setStatus]=useState(""); const [voteError,setVoteError]=useState(""); const [startedAt,setStartedAt]=useState(Date.now());
-  const candidateRestricted=Boolean(ballotId&&candidateOptions.some(candidate=>candidate.isSelf));
-  const selected=candidateRestricted?undefined:candidateOptions.find(c=>c.id===state.selectedCandidate&&!c.isSelf); const votingOpen=ballotPhase==="VOTING_OPEN";
-  useEffect(()=>{setStartedAt(Date.now());setVoteError("");},[ballotId]);
-  const castVote=async()=>{if(!selected)return;update({voteStage:"secure"});setVoteError("");setSecureProgress(12);setStatus("Creating private authorization");if(!ballotId){setTimeout(()=>{setSecureProgress(38);setStatus("Separating your session");},650);setTimeout(()=>{setSecureProgress(72);setStatus("Recording anonymous ballot");},1300);setTimeout(()=>{setSecureProgress(92);setStatus("Generating your receipt");},1900);setTimeout(()=>{setSecureProgress(100);update({voted:true,receipt:RECEIPT_SEED,voteStage:"receipt"});},2500);return;}try{setSecureProgress(35);const result=await castBlindVote({ballotId,candidateId:selected.id,accessToken,livenessProof:state.livenessProof,startedAt});setSecureProgress(100);setStatus("Ballot recorded");update({voted:true,receipt:result.receipt,voteStage:"receipt"});}catch(failure){setVoteError(failure instanceof Error?failure.message:"The ballot could not be submitted. Please try again.");setSecureProgress(0);setStatus("");update({voteStage:"review"});}};
-  const downloadReceipt=()=>{const body=`QUORUM VOTE RECEIPT\nBallot: ${ballotTitle}\nReceipt: ${state.receipt}\nRecorded: Sep 19, 2026 10:53 AM\nThis receipt proves recording, not candidate choice.`;const url=URL.createObjectURL(new Blob([body],{type:"text/plain"}));const a=document.createElement("a");a.href=url;a.download="quorum-vote-receipt.txt";a.click();URL.revokeObjectURL(url);};
-  if(state.voteStage==="receipt"||state.voted) return <><PageHeader eyebrow="Vote recorded" title="Your ballot is secured." description="Keep this receipt to verify that your anonymous ballot appears in the public ledger."/><div className="mt-8 grid gap-6 lg:grid-cols-[1.15fr_.85fr]"><div className={`${cardClass} overflow-hidden`}><div className="bg-[#163c34] p-6 text-white"><CheckCircle2 size={38} className="text-[#7bdbc2]"/><h2 className="display mt-4 text-3xl font-bold">Submission complete</h2><p className="mt-2 text-[#bfe4d8]">Recorded Sep 19, 2026 · 10:53 AM</p></div><div className="p-6"><label className="text-sm font-bold">Receipt hash</label><div className="mt-2 break-all rounded-xl bg-[#f1ece3] p-4 font-mono text-sm">{state.receipt||RECEIPT_SEED}</div><div className="mt-5 flex flex-wrap gap-3"><button onClick={()=>navigator.clipboard?.writeText(state.receipt||RECEIPT_SEED)} className={secondaryButton}><Copy size={17}/>Copy receipt</button><button onClick={downloadReceipt} className={secondaryButton}><Download size={17}/>Download</button><button onClick={()=>location.assign("/student/ledger")} className={primaryButton}><Search size={17}/>Verify now</button></div></div></div><aside className={`${cardClass} p-6`}><LockKeyhole className="text-[#8f2f43]"/><h3 className="display mt-4 text-2xl font-bold">What this receipt proves</h3><ul className="mt-5 space-y-4 text-sm text-[#5f5650]"><li className="flex gap-3"><Check size={18} className="shrink-0 text-[#17745a]"/>The anonymous ballot was recorded.</li><li className="flex gap-3"><Check size={18} className="shrink-0 text-[#17745a]"/>The authorization token cannot be reused.</li><li className="flex gap-3"><ShieldCheck size={18} className="shrink-0 text-[#17745a]"/>The receipt does not reveal your identity or choice.</li></ul></aside></div></>;
-  const stages=["Eligibility","Liveness","Candidates","Review","Receipt"]; const active={intro:0,liveness:1,candidates:2,review:3,secure:3,receipt:4}[state.voteStage];
-  return <><PageHeader eyebrow="Secure voting booth" title={ballotTitle} description={votingOpen?"Choose one candidate. Your authenticated identity is separated before the anonymous ballot is submitted.":"Review the approved candidates and their manifestos for this ballot."}/><div className="mt-7 grid grid-cols-5 gap-2">{stages.map((s,i)=><div key={s} className="text-center"><div className={`mx-auto grid size-8 place-items-center rounded-full text-sm font-bold ${i<=active?"bg-[#8f2f43] text-white":"bg-[#e3dbcf] text-[#786f67]"}`}>{i<active?<Check size={16}/>:i+1}</div><span className="mt-2 hidden text-xs font-semibold sm:block">{s}</span></div>)}</div>
-    {state.voteStage==="intro"&&<section className={`${cardClass} mt-8 overflow-hidden`}><div className="grid gap-8 p-6 sm:p-8 lg:grid-cols-[1.1fr_.9fr]"><div><StatusBadge tone={votingOpen&&!candidateRestricted?"green":"slate"}>{votingOpen?candidateRestricted?"Candidate access":"Voting open":ballotPhase==="CLOSED"?"Voting closed":"Nominations open"}</StatusBadge><h2 className="display mt-4 text-3xl font-bold">{votingOpen&&!candidateRestricted?"Before you begin":"Candidate profiles"}</h2><p className="mt-3 leading-7 text-[#5f5650]">{candidateRestricted?"Because you are an approved candidate in this ballot, you cannot cast a vote in it. You may still review and compare every candidate, and you can vote normally in other ballots where you are eligible.":votingOpen?"You are eligible for this ballot. Voting takes about three minutes and cannot be changed after submission.":"You can still read every approved candidacy statement, manifesto and reviewed highlight."}</p><div className="mt-6 grid gap-3">{!candidateRestricted&&<div className="flex gap-3 rounded-xl bg-[#f5f1e8] p-4"><Fingerprint className="shrink-0 text-[#8f2f43]"/><div><strong>Confirm presence</strong><p className="text-sm text-[#6e665f]">A short presence check confirms that you are completing the ballot yourself.</p></div></div>}<div className="flex gap-3 rounded-xl bg-[#f5f1e8] p-4"><KeyRound className="shrink-0 text-[#8f2f43]"/><div><strong>{candidateRestricted?"Ballot restriction":"Protect your privacy"}</strong><p className="text-sm text-[#6e665f]">{candidateRestricted?"Candidates do not receive voting authorization for the ballot where they are standing.":"Your identity is separated before your choice is submitted."}</p></div></div>{!candidateRestricted&&<div className="flex gap-3 rounded-xl bg-[#f5f1e8] p-4"><ClipboardCheck className="shrink-0 text-[#8f2f43]"/><div><strong>Keep your receipt</strong><p className="text-sm text-[#6e665f]">Verify recording without revealing your choice.</p></div></div>}</div></div><aside className="rounded-2xl bg-[#1b1422] p-6 text-white"><Clock3 className="text-[#d9ad5f]"/><p className="mt-10 text-sm uppercase tracking-widest text-[#bdb3c2]">{votingOpen?"Voting closes":"Schedule"}</p><strong className="display mt-2 block text-3xl">{closesAt?new Date(closesAt).toLocaleString():"Sep 25 · 11:00 PM"}</strong><p className="mt-5 text-sm leading-6 text-[#bdb3c2]">{candidateRestricted?"Your candidate profile remains visible, but voting is disabled only for this ballot.":votingOpen?"You may leave before final confirmation. Once the ballot is recorded, it cannot be edited or cast again.":"Voting is not currently open, but candidate information remains available."}</p><button onClick={()=>update({voteStage:votingOpen&&!candidateRestricted?"liveness":"candidates"})} className={`${primaryButton} mt-8 w-full`}>{votingOpen&&!candidateRestricted?"Begin securely":"View candidates"} <ArrowRight size={18}/></button></aside></div></section>}
-    {state.voteStage==="liveness"&&<section className={`${cardClass} mt-8 p-6 sm:p-8`}><FaceVerification accessToken={accessToken} verified={state.livenessPassed} onVerified={async distance=>{const livenessProof=ballotId?(await registerLivenessCompletion(accessToken,ballotId,distance)).proof:"";update({livenessPassed:true,livenessProof});}}/><div className="mt-6 flex justify-between"><button onClick={()=>update({voteStage:"intro"})} className={secondaryButton}><ArrowLeft size={17}/>Back</button>{state.livenessPassed&&<button onClick={()=>update({voteStage:"candidates"})} className={primaryButton}>Continue to candidates <ArrowRight size={17}/></button>}</div></section>}
-    {state.voteStage==="candidates"&&<section className="mt-8"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="display text-3xl font-bold">{votingOpen&&!candidateRestricted?"Choose a candidate":"Approved candidates"}</h2><p className="text-[#6e665f]">Read the full manifestos or compare up to three priorities side by side.</p></div><ComparisonDialog ids={compare} candidateOptions={candidateOptions}/></div>{candidateRestricted&&<div className="mt-5 rounded-2xl border border-[#e3ca92] bg-[#fff6d9] p-4 text-sm text-[#6e5a34]"><strong>Voting is disabled for you in this ballot.</strong> As an approved candidate, you may review the profiles but cannot select or vote for any candidate here.</div>}{candidateOptions.length===0?<div className={`${cardClass} mt-6 p-10 text-center`}><Users className="mx-auto text-[#8f2f43]"/><h3 className="mt-4 text-2xl font-bold">No approved candidates yet</h3><p className="mt-2 text-[#6e665f]">Approved nominations will appear here automatically.</p></div>:<div className="mt-6 grid gap-5 md:grid-cols-2">{candidateOptions.map(c=><article key={c.id} className={`${cardClass} flex flex-col p-6 ${state.selectedCandidate===c.id&&!c.isSelf&&!candidateRestricted?"ring-2 ring-[#8f2f43] ring-offset-2":""}`}><div className="flex items-center gap-4"><CandidateAvatar candidate={c} accessToken={accessToken}/><div><h3 className="display text-2xl font-bold">{c.name}</h3><p className="text-sm text-[#6e665f]">{c.year}</p></div></div><blockquote className="mt-5 font-semibold leading-6">“{c.statement}”</blockquote><h4 className="mt-5 text-sm font-bold uppercase tracking-wider text-[#8f2f43]">Manifesto highlights</h4><ul className="mt-3 flex-1 space-y-2 text-sm text-[#5f5650]">{c.highlights.map(h=><li key={h} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-[#17745a]"/>{h}</li>)}</ul><div className="mt-6 flex flex-wrap items-center justify-between gap-3"><CandidateDialog candidate={c}/><label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={compare.includes(c.id)} disabled={!compare.includes(c.id)&&compare.length>=3} onChange={e=>setCompare(current=>e.target.checked?[...current,c.id]:current.filter(id=>id!==c.id))} className="size-4 accent-[#8f2f43]"/>Compare</label>{votingOpen&&!candidateRestricted&&(c.isSelf?<span className="rounded-xl bg-[#f2ece2] px-4 py-3 text-sm font-bold text-[#6e665f]">Your candidate profile</span>:<button onClick={()=>update({selectedCandidate:c.id})} className={state.selectedCandidate===c.id?primaryButton:secondaryButton}>{state.selectedCandidate===c.id?<><Check size={17}/>Selected</>:"Select"}</button>)}</div></article>)}</div>}<div className="sticky bottom-4 mt-6 flex items-center justify-between gap-4 rounded-2xl border border-[#d8cebd] bg-[#fffdf9]/95 p-4 shadow-xl backdrop-blur"><button onClick={()=>update({voteStage:candidateRestricted||!votingOpen?"intro":"liveness"})} className={secondaryButton}><ArrowLeft size={17}/>Back</button><div className="hidden text-sm sm:block">{candidateRestricted?"Candidate profiles are available for review only":votingOpen?(selected?<><strong>{selected.name}</strong><span className="ml-2 text-[#6e665f]">selected</span></>:"Select one candidate to continue"):"Voting is not open for this ballot"}</div>{votingOpen&&!candidateRestricted&&<button disabled={!selected} onClick={()=>update({voteStage:"review"})} className={primaryButton}>Review ballot <ArrowRight size={17}/></button>}</div></section>}
-    {state.voteStage==="review"&&selected&&<section className="mt-8 grid gap-6 lg:grid-cols-[1.1fr_.9fr]"><div className={`${cardClass} p-6 sm:p-8`}><StatusBadge tone="gold">Final review</StatusBadge><h2 className="display mt-4 text-3xl font-bold">Your selection</h2><div className="mt-6 flex items-center gap-4 rounded-2xl bg-[#f5f1e8] p-5"><div className="grid size-16 place-items-center rounded-2xl text-xl font-bold text-white" style={{background:selected.color}}>{selected.initials}</div><div><strong className="display text-2xl">{selected.name}</strong><p className="text-sm text-[#6e665f]">{selected.year}</p></div></div><p className="mt-6 font-semibold">“{selected.statement}”</p><button onClick={()=>update({voteStage:"candidates"})} className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[#8f2f43]"><ArrowLeft size={16}/>Change selection</button></div><aside className={`${cardClass} p-6`}><LockKeyhole className="text-[#8f2f43]"/><h3 className="display mt-4 text-2xl font-bold">Submission privacy</h3><ol className="mt-5 space-y-4 text-sm text-[#5f5650]"><li><strong className="text-[#211a22]">1. Confirm eligibility</strong><br/>Your right to vote is checked before submission.</li><li><strong className="text-[#211a22]">2. Separate identity</strong><br/>Your account details are removed from your ballot choice.</li><li><strong className="text-[#211a22]">3. Prevent duplicate voting</strong><br/>Your one-time voting authorization cannot be reused.</li></ol>{voteError&&<p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-800">{voteError}</p>}<AlertDialog><AlertDialogTrigger asChild><button className={`${primaryButton} mt-7 w-full`}>Confirm and cast vote</button></AlertDialogTrigger><AlertDialogContent className="bg-[#fbf8f1]"><AlertDialogHeader><AlertDialogTitle className="display text-2xl">Cast this ballot?</AlertDialogTitle><AlertDialogDescription>Your selection cannot be changed after the anonymous ballot is recorded. The receipt will not show your candidate choice.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Review again</AlertDialogCancel><AlertDialogAction onClick={()=>void castVote()}>Cast ballot</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog></aside></section>}
-    {state.voteStage==="secure"&&<section className={`${cardClass} mx-auto mt-8 max-w-2xl p-8 text-center sm:p-12`}><div className="mx-auto grid size-20 place-items-center rounded-full bg-[#1b1422] text-[#d9ad5f]"><Fingerprint size={38} className="animate-pulse"/></div><h2 className="display mt-6 text-3xl font-bold">Securing your anonymous ballot</h2><p className="mt-3 text-[#6e665f]">Keep this page open until your receipt appears.</p><Progress value={secureProgress} className="mt-8 h-3"/><p className="mt-4 text-sm font-semibold text-[#8f2f43]">{status}</p><div className="mt-8 grid grid-cols-3 gap-2 text-xs text-[#6e665f]"><span>Authorization</span><span>Private submission</span><span>Receipt</span></div></section>}
-  </>;
-}
-
-function StudentVoting({ state, update, accessToken }: { state: DemoState; update: (patch: Partial<DemoState>)=>void; accessToken: string }) {
-  const searchParams=useSearchParams();
-  const requestedBallot=searchParams.get("ballot");
-  const [ballots,setBallots]=useState<StudentBallotRecord[]>([]);
-  const [selectedBallotId,setSelectedBallotId]=useState(requestedBallot||"demo");
-  const [realCandidates,setRealCandidates]=useState<CandidateProfile[]>([]);
-  const [loading,setLoading]=useState(true);
-  const [error,setError]=useState("");
-
-  useEffect(()=>{let active=true;void listStudentBallots(accessToken).then(items=>{if(!active)return;setBallots(items);if(!requestedBallot){const firstWithCandidates=items.find(item=>item.candidateCount>0);if(firstWithCandidates)setSelectedBallotId(firstWithCandidates.id);}}).catch(()=>{if(active)setError("Ballots could not be loaded. Please try again.");}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[accessToken,requestedBallot]);
-  useEffect(()=>{if(selectedBallotId==="demo"){setRealCandidates([]);return;}let active=true;setLoading(true);setError("");void listApprovedCandidates(selectedBallotId,accessToken).then(items=>{if(!active)return;const palette=["#8f2f43","#396257","#5d4d8f","#9a6234"];setRealCandidates(items.map((candidate,index)=>({id:candidate.id,initials:initialsFor(candidate.fullName),name:candidate.fullName,year:`${candidate.department} · Year ${candidate.classYear}`,statement:candidate.candidacyStatement,color:palette[index%palette.length],highlights:candidate.manifestoHighlights,manifesto:candidate.manifestoText,topics:candidate.manifestoTopics,photo:{ballotId:candidate.ballotId,candidateId:candidate.id},isSelf:candidate.isCurrentStudent})));}).catch(failure=>{if(active)setError(failure instanceof Error?failure.message:"Candidates could not be loaded.");}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[selectedBallotId,accessToken]);
-
-  const selectedBallot=ballots.find(ballot=>ballot.id===selectedBallotId);
-  const chooseBallot=(ballotId:string)=>{setSelectedBallotId(ballotId);update({selectedCandidate:"",voteStage:"intro",livenessPassed:false,livenessProof:"",voted:false,receipt:""});};
-  return <><section className={`${cardClass} mb-7 p-5`}><label className="font-semibold">Choose a ballot<select value={selectedBallotId} onChange={event=>chooseBallot(event.target.value)} className={fieldClass}><option value="demo">Student Government Executive Board Election 2026</option>{ballots.map(ballot=><option key={ballot.id} value={ballot.id}>{ballot.title}</option>)}</select></label><p className="mt-2 text-sm text-[#6e665f]">Approved nominations appear automatically in their own ballot. The Executive Board sample remains available for demonstration.</p></section>{error&&<p role="alert" className="mb-6 rounded-xl bg-red-50 p-4 text-sm text-red-800">{error}</p>}{loading&&selectedBallotId!=="demo"?<div className={`${cardClass} p-10 text-center text-[#6e665f]`}>Loading approved candidates…</div>:<VoteFlow state={state} update={update} accessToken={accessToken} candidateOptions={selectedBallotId==="demo"?candidates:realCandidates} ballotId={selectedBallot?.id} ballotTitle={selectedBallot?.title||"Student Government Executive Board"} ballotPhase={selectedBallot?.phase||"VOTING_OPEN"} closesAt={selectedBallot?.endTime}/>}</>;
-}
-
-function Ledger({ state, admin=false }: { state: DemoState; admin?: boolean }) {
-  const [query,setQuery]=useState(state.receipt); const [searched,setSearched]=useState(false); const match=query.trim().toLowerCase()===(state.receipt||RECEIPT_SEED).toLowerCase()||query.trim().toLowerCase()===RECEIPT_SEED.toLowerCase(); const hashes=[state.receipt||RECEIPT_SEED,"1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b","9c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d"];
-  return <><PageHeader eyebrow={admin?"Administrative verification":"Public verification"} title="Public audit ledger" description="Check that a receipt was recorded without revealing the voter or candidate choice. Recording alone does not prove inclusion in a published tally."/><div className={`${cardClass} mt-8 p-6`}><div className="flex flex-col gap-3 sm:flex-row"><input value={query} onChange={e=>{setQuery(e.target.value);setSearched(false)}} placeholder="Paste a complete 64-character receipt hash" className={`${fieldClass} mt-0 min-w-0 flex-1 font-mono text-sm`}/><button onClick={()=>setSearched(true)} className={primaryButton}><Search size={17}/>Verify receipt</button></div>{searched&&<div className={`mt-5 flex items-start gap-3 rounded-xl p-4 ${match?"bg-[#e3f4ee] text-[#17604c]":"bg-[#fdebea] text-[#9f2f27]"}`}>{match?<CheckCircle2 className="shrink-0"/>:<XCircle className="shrink-0"/>}<div><strong>{match?"Receipt recorded":"Receipt not found"}</strong><p className="text-sm">{match?"This hash appears in the anonymous ledger. Candidate choice and voter identity remain hidden.":"Check that you copied the full receipt. Unpublished or invalid receipts will not appear."}</p></div></div>}</div><div className={`${cardClass} mt-6 overflow-hidden`}><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-[#f2ece2] text-xs uppercase tracking-wider text-[#756d66]"><tr><th className="px-5 py-4">Ballot</th><th className="px-5 py-4">Receipt hash</th><th className="px-5 py-4">Status</th></tr></thead><tbody>{hashes.map(h=><tr key={h} className="border-t border-[#e4dccf]"><td className="px-5 py-4 font-semibold">Student Government Executive Board Election 2026</td><td className="max-w-[420px] truncate px-5 py-4 font-mono text-xs">{h}</td><td className="px-5 py-4"><StatusBadge>Recorded</StatusBadge></td></tr>)}</tbody></table></div></div></>;
-}
-
-function Results({ state, admin=false, update }: { state: DemoState; admin?: boolean; update?: (p:Partial<DemoState>)=>void }) {
-  const totals=[{name:"Maya Khalil",votes:184,pct:38,color:"#6f3552"},{name:"Omar Haddad",votes:151,pct:31,color:"#396257"},{name:"Lina Saad",votes:112,pct:23,color:"#5d4d8f"},{name:"Tarek Nassar",votes:39,pct:8,color:"#9a6234"}];
-  return <><PageHeader eyebrow={admin?"Verified tally":"Election results"} title={admin?"Review and publish":"Published results"} description={admin?"Only accepted votes are included. Review quarantine decisions before publishing.":"Certified totals for completed ballots. Anonymous receipts remain separate from candidate totals."} action={state.resultPublished?<StatusBadge>Published Sep 26</StatusBadge>:<StatusBadge tone="gold">Awaiting publication</StatusBadge>}/><div className="mt-8 grid gap-6 lg:grid-cols-[1.3fr_.7fr]"><section className={`${cardClass} p-6 sm:p-8`}><div className="flex items-start justify-between gap-4"><div><h2 className="display text-3xl font-bold">Executive Board Election 2026</h2><p className="mt-1 text-sm text-[#6e665f]">486 accepted ballots · 61% turnout</p></div>{state.resultPublished&&<div className="rounded-xl bg-[#e3f4ee] p-3 text-[#17604c]"><FileCheck2/></div>}</div>{!state.resultPublished&&!admin?<div className="mt-8 rounded-2xl bg-[#f5f1e8] p-8 text-center"><Clock3 className="mx-auto text-[#a27022]"/><h3 className="display mt-3 text-2xl font-bold">Results are being verified</h3><p className="mt-2 text-sm text-[#6e665f]">The administrator has not published this tally yet.</p></div>:<div className="mt-8 space-y-5">{totals.map((r,i)=><div key={r.name}><div className="mb-2 flex justify-between gap-4"><span className="font-semibold">{i===0&&<span className="mr-2 text-[#a27022]">●</span>}{r.name}</span><span className="font-bold">{r.votes} <span className="font-normal text-[#6e665f]">({r.pct}%)</span></span></div><div className="h-3 overflow-hidden rounded-full bg-[#eee8df]"><div className="h-full rounded-full" style={{width:`${r.pct}%`,background:r.color}}/></div></div>)}</div>}{admin&&!state.resultPublished&&<AlertDialog><AlertDialogTrigger asChild><button className={`${primaryButton} mt-8`}><FileCheck2 size={18}/>Publish verified results</button></AlertDialogTrigger><AlertDialogContent className="bg-[#fbf8f1]"><AlertDialogHeader><AlertDialogTitle className="display text-2xl">Publish these results?</AlertDialogTitle><AlertDialogDescription>This will make the accepted tally public. Quarantined votes remain excluded unless reviewed and restored.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Keep reviewing</AlertDialogCancel><AlertDialogAction onClick={()=>update?.({resultPublished:true})}>Publish results</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}</section><aside className="space-y-4"><div className="rounded-2xl bg-[#1b1422] p-6 text-white"><p className="text-xs uppercase tracking-widest text-[#bdb3c2]">Leading candidate</p><strong className="display mt-3 block text-3xl">Maya Khalil</strong><p className="mt-2 text-sm text-[#bdb3c2]">33-vote margin</p></div><div className={`${cardClass} p-6`}><h3 className="font-bold">Tally audit</h3><dl className="mt-4 space-y-3 text-sm"><div className="flex justify-between"><dt>Tokens issued</dt><dd className="font-bold">488</dd></div><div className="flex justify-between"><dt>Ballots received</dt><dd className="font-bold">488</dd></div><div className="flex justify-between"><dt>Accepted</dt><dd className="font-bold text-[#17745a]">486</dd></div><div className="flex justify-between"><dt>Quarantined</dt><dd className="font-bold text-[#a4382e]">2</dd></div><div className="flex justify-between border-t border-[#ded5c5] pt-3"><dt>Unlinked discrepancy</dt><dd className="font-bold">0</dd></div></dl></div><div className={`${cardClass} p-6`}><h3 className="font-bold">Tie policy</h3><p className="mt-2 text-sm leading-6 text-[#6e665f]">An exact tie remains unresolved and is marked for a runoff. An administrator cannot select a winner manually.</p></div></aside></div></>;
-}
-
-function AdminOverview({ state, update, accessToken }: { state: DemoState; update:(p:Partial<DemoState>)=>void; accessToken: string }) {
-  const [draft,setDraft]=useState(state.announcement);
-  const [pendingNominations,setPendingNominations]=useState<number|null>(null);
-  useEffect(()=>{let active=true;void listAdminNominations(accessToken).then(items=>{if(active)setPendingNominations(items.filter(item=>item.nominationStatus==="PENDING").length);}).catch(()=>{if(active)setPendingNominations(null);});return()=>{active=false;};},[accessToken]);
-  return <><PageHeader eyebrow="Administrator workspace" title="Election operations" description="Monitor every ballot phase, nomination queue, anonymous submission count and publication decision."/><section className="mt-8 flex flex-col gap-4 rounded-2xl bg-[#1b1422] p-5 text-white sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs uppercase tracking-[.18em] text-[#bdb3c2]">Simulated platform time</p><strong className="mt-1 block font-mono text-lg text-[#e3bc70]">Sat, Sep {19+state.simOffsetDays}, 2026 · 10:14 AM</strong></div><div className="flex flex-wrap gap-2"><button onClick={()=>update({simOffsetDays:state.simOffsetDays})} className="rounded-lg border border-white/20 px-3 py-2 text-sm font-bold">+1 hour</button><button onClick={()=>update({simOffsetDays:state.simOffsetDays+1})} className="rounded-lg border border-white/20 px-3 py-2 text-sm font-bold">+1 day</button><button onClick={()=>update({simOffsetDays:state.simOffsetDays+7})} className="rounded-lg border border-white/20 px-3 py-2 text-sm font-bold">+1 week</button><button onClick={()=>update({simOffsetDays:0})} className="rounded-lg bg-[#bd8f35] px-3 py-2 text-sm font-bold">Reset</button></div></section><section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[["3","Ballots posted",Vote],[pendingNominations===null?"—":String(pendingNominations),"Nominations pending",Users],["488","Blind tokens issued",KeyRound],[state.anomalyQuarantined?"2":"1","Votes quarantined",ShieldCheck]].map(([n,l,Icon])=><div key={String(l)} className={`${cardClass} p-5`}><Icon className="text-[#8f2f43]"/><strong className="display mt-5 block text-3xl">{n as string}</strong><span className="text-sm text-[#6e665f]">{l as string}</span></div>)}</section><div className="mt-6 grid gap-6 lg:grid-cols-[1.25fr_.75fr]"><section className={`${cardClass} overflow-hidden`}><div className="border-b border-[#ded5c5] p-6"><h2 className="display text-2xl font-bold">Ballots at a glance</h2></div><div className="divide-y divide-[#e4dccf]">{ballots.map(b=><div key={b.title} className="grid gap-3 p-5 sm:grid-cols-[1fr_auto] sm:items-center"><div><strong>{b.title}</strong><p className="mt-1 text-sm text-[#6e665f]">{b.scope}</p></div><StatusBadge tone={b.tone as "green"|"violet"|"gold"}>{b.phase}</StatusBadge></div>)}{state.createdBallot&&<div className="grid gap-3 p-5 sm:grid-cols-[1fr_auto] sm:items-center"><div><strong>{state.createdBallot}</strong><p className="text-sm text-[#6e665f]">Robotics Club · Draft schedule</p></div><StatusBadge tone="slate">Draft</StatusBadge></div>}</div></section><aside className={`${cardClass} p-6`}><div className="flex items-center gap-3"><Bell className="text-[#a27022]"/><h2 className="display text-2xl font-bold">Dashboard banner</h2></div><p className="mt-2 text-sm text-[#6e665f]">Post a temporary message above automatic phase notices.</p><textarea value={draft} onChange={e=>setDraft(e.target.value)} rows={4} placeholder="Message eligible students…" className={fieldClass}/><div className="mt-4 flex gap-2"><button onClick={()=>update({announcement:draft})} className={primaryButton}>Publish</button>{state.announcement&&<button onClick={()=>{setDraft("");update({announcement:""})}} className={secondaryButton}>Clear</button>}</div></aside></div></>;
-}
-
-function CreateBallot({ update }: { update:(p:Partial<DemoState>)=>void }) {
-  const router=useRouter(); const [step,setStep]=useState("details"); const [title,setTitle]=useState("Robotics Club President 2026"); const [scope,setScope]=useState("CLUB");
-  const save=()=>{update({createdBallot:title});router.push("/admin/ballots");};
-  return <><PageHeader eyebrow="Ballot builder" title="Post a new ballot" description="Define the office, eligible students and every phase before notifying the campus."/><Tabs value={step} onValueChange={setStep} className="mt-8"><TabsList className="grid h-auto w-full grid-cols-3 bg-[#e9e1d4] p-1"><TabsTrigger value="details" className="py-3">1. Details</TabsTrigger><TabsTrigger value="schedule" className="py-3">2. Scope & schedule</TabsTrigger><TabsTrigger value="review" className="py-3">3. Review</TabsTrigger></TabsList><div className={`${cardClass} mt-5 p-6 sm:p-8`}><TabsContent value="details"><h2 className="display text-3xl font-bold">Ballot details</h2><label className="mt-6 block font-semibold">Ballot title<input value={title} onChange={e=>setTitle(e.target.value)} className={fieldClass}/></label><label className="mt-5 block font-semibold">Description<textarea rows={5} defaultValue="Elect the student responsible for representing the Robotics Club and coordinating its annual programme." className={fieldClass}/></label><div className="mt-6 flex justify-end"><button onClick={()=>setStep("schedule")} className={primaryButton}>Continue <ArrowRight size={17}/></button></div></TabsContent><TabsContent value="schedule"><h2 className="display text-3xl font-bold">Scope and schedule</h2><div className="mt-6 grid gap-5 sm:grid-cols-2"><label className="font-semibold">Eligibility scope<select value={scope} onChange={e=>setScope(e.target.value)} className={fieldClass}><option value="GLOBAL">Global — every eligible student</option><option value="DEPARTMENT">Department</option><option value="YEAR">Class year</option><option value="CLUB">Club or organization</option><option value="COMBINED">Combined rules (all must match)</option></select></label><label className="font-semibold">Scope target<select className={fieldClass}><option>Robotics Society</option><option>Computer Science</option><option>Year 4</option></select></label><label className="font-semibold">Nominations open<input type="datetime-local" defaultValue="2026-09-20T09:00" className={fieldClass}/></label><label className="font-semibold">Nominations close<input type="datetime-local" defaultValue="2026-09-23T18:00" className={fieldClass}/></label><label className="font-semibold">Voting opens<input type="datetime-local" defaultValue="2026-09-24T09:00" className={fieldClass}/></label><label className="font-semibold">Voting closes<input type="datetime-local" defaultValue="2026-09-25T23:00" className={fieldClass}/></label><label className="font-semibold">Results publish after<input type="datetime-local" defaultValue="2026-09-26T12:00" className={fieldClass}/></label></div><div className="mt-6 flex justify-between"><button onClick={()=>setStep("details")} className={secondaryButton}><ArrowLeft size={17}/>Back</button><button onClick={()=>setStep("review")} className={primaryButton}>Review ballot <ArrowRight size={17}/></button></div></TabsContent><TabsContent value="review"><h2 className="display text-3xl font-bold">Review before posting</h2><div className="mt-6 grid gap-4 rounded-2xl bg-[#f5f1e8] p-5 sm:grid-cols-2"><div><span className="text-sm text-[#7c746d]">Ballot</span><strong className="block">{title}</strong></div><div><span className="text-sm text-[#7c746d]">Scope</span><strong className="block">{scope} · Robotics Society</strong></div><div><span className="text-sm text-[#7c746d]">Nomination window</span><strong className="block">Sep 20–23</strong></div><div><span className="text-sm text-[#7c746d]">Voting window</span><strong className="block">Sep 24–25</strong></div></div><div className="mt-5 flex items-start gap-3 rounded-xl border border-[#e3ca92] bg-[#fff6d9] p-4 text-sm"><Bell className="shrink-0 text-[#9a6818]"/>Eligible students will be notified when nominations open.</div><div className="mt-6 flex justify-between"><button onClick={()=>setStep("schedule")} className={secondaryButton}><ArrowLeft size={17}/>Back</button><button onClick={save} className={primaryButton}>Post ballot and notify</button></div></TabsContent></div></Tabs></>;
-}
-
-function ManageBallots({ state, update }: { state: DemoState; update:(p:Partial<DemoState>)=>void }) {
-  const [open,setOpen]=useState("cs"); const [rejectOpen,setRejectOpen]=useState(false); const [reason,setReason]=useState("");
-  const rows=[{id:"exec",title:"Student Government Executive Board Election 2026",scope:"Global",phase:"Voting open",tone:"green"},{id:"cs",title:"Computer Science Department Representative",scope:"Computer Science",phase:"Nominations open",tone:"violet"},{id:"senior",title:"Senior Class Committee 2026",scope:"Year 4",phase:"Upcoming",tone:"gold"}];
-  return <><PageHeader eyebrow="Ballot management" title="Manage ballots" description="Inspect lifecycle, review nominations and keep every administrative decision auditable."/><div className="mt-8 space-y-4">{rows.map(r=><section key={r.id} className={`${cardClass} overflow-hidden`}><button onClick={()=>setOpen(open===r.id?"":r.id)} className="flex w-full items-center justify-between gap-4 p-5 text-left"><div><h2 className="display text-2xl font-bold">{r.title}</h2><p className="mt-1 text-sm text-[#6e665f]">{r.scope} · <StatusBadge tone={r.tone as "green"|"violet"|"gold"}>{r.phase}</StatusBadge></p></div><ChevronDown className={`transition ${open===r.id?"rotate-180":""}`}/></button>{open===r.id&&<div className="border-t border-[#ded5c5] bg-[#fcfaf6] p-5"><div className="grid gap-4 sm:grid-cols-4">{[["Eligible voters",r.id==="exec"?"800":"126"],["Candidates",r.id==="exec"?"4":state.nominationStatus==="none"?"0":"1"],["Tokens issued",r.id==="exec"?"488":"0"],["Key version",r.id==="exec"?"exec-v3":"cs-v1"]].map(([l,v])=><div key={l} className="rounded-xl border border-[#e1d8ca] bg-white p-4"><span className="text-xs text-[#7d756e]">{l}</span><strong className="mt-1 block">{v}</strong></div>)}</div>{r.id==="cs"&&<div className="mt-6"><h3 className="display text-2xl font-bold">Nomination queue</h3>{state.nominationStatus==="none"?<div className="mt-4 rounded-xl border border-dashed border-[#c9bdac] p-7 text-center text-[#6e665f]">No nominations submitted yet.</div>:<article className="mt-4 rounded-2xl border border-[#d8cebd] bg-white p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div className="flex gap-4"><div className="grid size-12 shrink-0 place-items-center rounded-xl bg-[#8f2f43] font-bold text-white">NA</div><div><strong>Nada Alahmad</strong><p className="text-sm text-[#6e665f]">Computer Science · Year 4</p><p className="mt-3 font-semibold">“{state.nominationStatement||"Transparent representation for every CS cohort."}”</p></div></div><StatusBadge tone={state.nominationStatus==="approved"?"green":state.nominationStatus==="rejected"?"red":"gold"}>{state.nominationStatus}</StatusBadge></div><details className="mt-5 rounded-xl bg-[#f5f1e8] p-4"><summary className="cursor-pointer font-bold">Review manifesto and highlights</summary><p className="mt-4 leading-7 text-[#5f5650]">{state.nominationManifesto||"I will publish meeting notes, hold monthly office hours and build a shared feedback board for Computer Science students."}</p><h4 className="mt-5 text-sm font-bold uppercase tracking-wider text-[#8f2f43]">Prepared highlights</h4><ul className="mt-2 space-y-2 text-sm"><li>• Publish representative meeting notes</li><li>• Hold monthly student office hours</li><li>• Maintain a shared cohort feedback board</li></ul></details>{state.nominationStatus==="pending"&&<div className="mt-5 flex flex-wrap justify-end gap-3"><button onClick={()=>setRejectOpen(true)} className={secondaryButton}>Reject with reason</button><button onClick={()=>update({nominationStatus:"approved"})} className={primaryButton}><Check size={17}/>Approve and publish</button></div>}</article>}</div>}</div>}</section>)}{state.createdBallot&&<section className={`${cardClass} p-5`}><StatusBadge tone="slate">Draft</StatusBadge><h2 className="display mt-3 text-2xl font-bold">{state.createdBallot}</h2><p className="text-sm text-[#6e665f]">Robotics Society · Scheduled Sep 20–26</p></section>}</div><Dialog open={rejectOpen} onOpenChange={setRejectOpen}><DialogContent className="bg-[#fbf8f1]"><DialogHeader><DialogTitle className="display text-2xl">Reject nomination</DialogTitle><DialogDescription>The student will see this reason in their nomination tracker.</DialogDescription></DialogHeader><label className="font-semibold">Reason<textarea value={reason} onChange={e=>setReason(e.target.value)} rows={4} className={fieldClass} placeholder="Explain what must be corrected…"/></label><DialogFooter><button onClick={()=>setRejectOpen(false)} className={secondaryButton}>Cancel</button><button disabled={!reason.trim()} onClick={()=>{update({nominationStatus:"rejected"});setRejectOpen(false)}} className={primaryButton}>Reject nomination</button></DialogFooter></DialogContent></Dialog></>;
-}
-
-function AnomalyConsole({ state, update }: { state:DemoState; update:(p:Partial<DemoState>)=>void }) {
-  const [reason,setReason]=useState(state.anomalyReviewReason);
-  return <><PageHeader eyebrow="Privacy-preserving security" title="Anomaly console" description="Review coarse risk signals without storing raw IP addresses, full user agents, JWTs, cookies or identity-linked request IDs." action={<StatusBadge>System optimal</StatusBadge>}/><section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[["0.82","Highest risk score",Gauge],["488","Tokens issued",KeyRound],["488","Ballots received",Vote],[state.anomalyQuarantined?"2":"1","Votes quarantined",ShieldCheck]].map(([n,l,Icon])=><div key={String(l)} className={`${cardClass} p-5`}><Icon className="text-[#8f2f43]"/><strong className="display mt-5 block text-3xl">{n as string}</strong><span className="text-sm text-[#6e665f]">{l as string}</span></div>)}</section><div className="mt-6 grid gap-6 lg:grid-cols-[1.2fr_.8fr]"><section className={`${cardClass} p-6`}><div className="flex items-start justify-between gap-4"><div><StatusBadge tone={state.anomalyQuarantined?"red":"green"}>{state.anomalyQuarantined?"Quarantined":"Restored after review"}</StatusBadge><h2 className="display mt-3 text-2xl font-bold">Submission risk event #AQ-204</h2><p className="mt-1 text-sm text-[#6e665f]">Executive Board Election · 10:14:53 AM</p></div><strong className="font-mono text-2xl text-[#a4382e]">0.82</strong></div><div className="mt-6 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-[#f5f1e8] p-4"><span className="text-xs text-[#756d66]">Completion duration band</span><strong className="block">Under 20 seconds</strong></div><div className="rounded-xl bg-[#f5f1e8] p-4"><span className="text-xs text-[#756d66]">Request rate bucket</span><strong className="block">Elevated campus burst</strong></div><div className="rounded-xl bg-[#f5f1e8] p-4"><span className="text-xs text-[#756d66]">Generic device class</span><strong className="block">Desktop browser</strong></div><div className="rounded-xl bg-[#f5f1e8] p-4"><span className="text-xs text-[#756d66]">Replay indicator</span><strong className="block">None</strong></div></div><div className="mt-5 flex items-start gap-3 rounded-xl bg-[#edf3f7] p-4 text-sm text-[#344c59]"><ShieldCheck className="shrink-0" size={19}/>No raw network identifiers or authenticated-session values were retained with this ballot.</div></section><aside className={`${cardClass} p-6`}><h2 className="display text-2xl font-bold">Review decision</h2><p className="mt-2 text-sm text-[#6e665f]">A reason is required to restore a false positive to the tally.</p><textarea value={reason} onChange={e=>setReason(e.target.value)} rows={5} placeholder="Document the evidence used…" className={fieldClass}/><button disabled={!reason.trim()} onClick={()=>update({anomalyQuarantined:false,anomalyReviewReason:reason})} className={`${primaryButton} mt-4 w-full`}>{state.anomalyQuarantined?"Restore vote to tally":"Decision recorded"}</button></aside></div><section className={`${cardClass} mt-6 overflow-hidden`}><div className="border-b border-[#ded5c5] p-5"><h2 className="display text-2xl font-bold">Recent security events</h2></div><div className="divide-y divide-[#e4dccf] text-sm">{[["10:14:53","NOTICE","Coarse campus request bucket evaluated as elevated."],["10:14:53","INFO","Anonymous signature verified and token digest burned."],["10:12:08","INFO","Credential-free ballot accepted without session metadata."]].map(([t,l,m])=><div key={t+m} className="grid gap-2 p-4 sm:grid-cols-[90px_80px_1fr]"><span className="font-mono text-[#756d66]">{t}</span><strong className="text-[#6550b5]">{l}</strong><span>{m}</span></div>)}</div></section></>;
-}
-
-function NotFound(){const router=useRouter();return <div className="grid min-h-screen place-items-center bg-[#17111f] p-6 text-white"><div className="max-w-lg text-center"><div className="mx-auto grid size-16 place-items-center rounded-2xl border border-[#c49a4a]/40 text-[#d9ad5f]"><AlertTriangle/></div><p className="mt-6 text-xs font-bold uppercase tracking-widest text-[#d9ad5f]">Page not found</p><h1 className="display mt-3 text-5xl font-bold">This ballot path is closed.</h1><p className="mt-4 text-[#bdb3c2]">Return to your workspace or use the public verification tools.</p><button onClick={()=>router.push("/")} className={`${primaryButton} mt-7`}>Return to sign in</button></div></div>}
-
-function PublicPage({ children }: { children: React.ReactNode }){const router=useRouter();return <div className="min-h-screen bg-[#f5f1e8]"><header className="border-b border-[#ded5c5] bg-[#17111f] px-5 py-4 text-white"><div className="mx-auto flex max-w-6xl items-center justify-between"><Brand/><nav className="flex gap-2"><button onClick={()=>router.push("/public/verify")} className="rounded-lg px-3 py-2 text-sm font-semibold hover:bg-white/10">Verify</button><button onClick={()=>router.push("/public/results")} className="rounded-lg px-3 py-2 text-sm font-semibold hover:bg-white/10">Results</button><button onClick={()=>router.push("/")} className="rounded-lg border border-white/20 px-3 py-2 text-sm font-semibold">Sign in</button></nav></div></header><main className="p-5 sm:p-8 lg:p-12"><div className="mx-auto max-w-6xl">{children}</div></main></div>}
-
-type ToolContext = { registerTool: (tool: Record<string, unknown>, options?: {signal?:AbortSignal}) => void|Promise<void> };
-
-export function QuorumApp(){
-  const pathname=usePathname();
-  const router=useRouter();
-  const {state,update,reset,hydrated}=useDemoState();
-  const [session,setSession]=useState<QuorumSession|null>(null);
-  const [authReady,setAuthReady]=useState(false);
-
-  useEffect(()=>{
-    let active=true;
-    const restore=async()=>{
-      const stored=readStoredSession();
-      if(stored?.role==="student"){
-        try{
-          const refreshed=await restoreStudentSession(stored);
-          if(active){storeSession(refreshed);setSession(refreshed);}
-        }catch{
+  useEffect(() => {
+    let active = true;
+    const restore = async () => {
+      const stored = readStoredSession();
+      if (stored?.role === "student") {
+        try {
+          const refreshed = await restoreStudentSession(stored);
+          if (active) { storeSession(refreshed); setSession(refreshed); }
+        } catch {
           clearStoredSession();
-          if(active)setSession(null);
+          if (active) setSession(null);
         }
-      }else if(stored?.role==="admin"){
-        try{
-          const refreshed=await restoreAdministratorSession(stored);
-          if(active){storeSession(refreshed);setSession(refreshed);}
-        }catch{
+      } else if (stored?.role === "admin") {
+        try {
+          const refreshed = await restoreAdministratorSession(stored);
+          if (active) { storeSession(refreshed); setSession(refreshed); }
+        } catch {
           clearStoredSession();
-          if(active)setSession(null);
+          if (active) setSession(null);
         }
-      }else if(active){
+      } else if (active) {
         setSession(stored);
       }
-      if(active)setAuthReady(true);
+      if (active) setAuthReady(true);
     };
     void restore();
-    return()=>{active=false;};
-  },[]);
+    return () => { active = false; };
+  }, []);
 
-  useEffect(()=>{
-    if(!authReady)return;
-    const isPublic=pathname==="/"||pathname.startsWith("/public/");
-    if(!isPublic&&!session){router.replace("/");return;}
-    if(pathname==="/"&&session){router.replace(session.role==="student"?"/student/dashboard":"/admin/overview");}
-  },[authReady,pathname,router,session]);
+  useEffect(() => {
+    if (!authReady) return;
+    const isPublic = pathname === "/" || pathname.startsWith("/public/");
+    if (!isPublic && !session) {
+      router.replace("/");
+      return;
+    }
+    if (pathname === "/" && session) {
+      router.replace(session.role === "student" ? "/student/dashboard" : "/admin/overview");
+    }
+  }, [authReady, pathname, router, session]);
 
-  const authenticated=(nextSession:QuorumSession)=>{
+  const authenticated = (nextSession: QuorumSession) => {
     storeSession(nextSession);
     setSession(nextSession);
-    router.push(nextSession.role==="student"?"/student/dashboard":"/admin/overview");
+    router.push(nextSession.role === "student" ? "/student/dashboard" : "/admin/overview");
   };
 
-  const logout=()=>{
-    if(session)void notifyLogout(session.accessToken).catch(()=>{});
+  const logout = () => {
+    if (session) void notifyLogout(session.accessToken).catch(() => {});
     clearStoredSession();
     setSession(null);
     router.replace("/");
   };
 
-  useEffect(()=>{const context=(document as Document & {modelContext?:ToolContext}).modelContext;if(!context?.registerTool)return;const lifecycle=new AbortController();const register=async()=>{await context.registerTool({name:"navigate_quorum",title:"Open Quorum area",description:"Navigate to a named Quorum prototype area.",inputSchema:{type:"object",properties:{area:{type:"string",enum:["login","student-dashboard","student-nominations","student-vote","public-verify","public-results","admin-overview","admin-ballots","admin-anomalies","admin-results"]}},required:["area"],additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:false},execute:(input:unknown)=>{const map:Record<string,string>={login:"/","student-dashboard":"/student/dashboard","student-nominations":"/student/nominations","student-vote":"/student/vote","public-verify":"/public/verify","public-results":"/public/results","admin-overview":"/admin/overview","admin-ballots":"/admin/ballots","admin-anomalies":"/admin/anomalies","admin-results":"/admin/results"};const area=(input as {area?:string}).area;if(!area||!map[area])throw new Error("Unknown area");router.push(map[area]);return{path:map[area]};}},{signal:lifecycle.signal});await context.registerTool({name:"verify_quorum_receipt",title:"Verify receipt",description:"Check whether a Quorum receipt hash is present in the demo public ledger.",inputSchema:{type:"object",properties:{receipt:{type:"string"}},required:["receipt"],additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:false},execute:(input:unknown)=>{const receipt=(input as {receipt?:string}).receipt?.trim().toLowerCase();return{recorded:receipt===(state.receipt||RECEIPT_SEED).toLowerCase(),revealsIdentity:false,revealsCandidate:false};}},{signal:lifecycle.signal});};void register().catch(()=>{});return()=>lifecycle.abort();},[router,state.receipt]);
-  if(!authReady||!hydrated||(pathname==="/"&&session)) return <div className="min-h-screen bg-[#15101c]"/>;
-  if(pathname==="/") return <Login onAuthenticated={authenticated}/>;
-  if(pathname==="/public/verify") return <PublicPage><Ledger state={state}/></PublicPage>;
-  if(pathname==="/public/results") return <PublicPage><Results state={state}/></PublicPage>;
-  if(pathname.startsWith("/student/")&&session?.role!=="student") return <NotFound/>;
-  if(pathname.startsWith("/admin/")&&session?.role!=="admin") return <NotFound/>;
-  const studentUser=session?.role==="student"?session.user:undefined;
-  const administratorUser=session?.role==="admin"?session.user:undefined;
-  if(pathname==="/student/dashboard"&&studentUser&&session?.role==="student") return <Shell role="student" user={studentUser} reset={reset} onLogout={logout}><StudentBallotDashboard accessToken={session.accessToken} user={studentUser} voted={state.voted}/></Shell>;
-  if(pathname==="/student/nominations"&&studentUser&&session?.role==="student") return <Shell role="student" user={studentUser} reset={reset} onLogout={logout}><StudentNominations accessToken={session.accessToken} user={studentUser}/></Shell>;
-  if(pathname==="/student/vote"&&session?.role==="student") return <Shell role="student" user={studentUser} reset={reset} onLogout={logout}><StudentVoting state={state} update={update} accessToken={session.accessToken}/></Shell>;
-  if(pathname==="/student/ledger") return <Shell role="student" user={studentUser} reset={reset} onLogout={logout}><Ledger state={state}/></Shell>;
-  if(pathname==="/student/results") return <Shell role="student" user={studentUser} reset={reset} onLogout={logout}><Results state={state}/></Shell>;
-  if(pathname==="/admin/overview"&&session?.role==="admin") return <Shell role="admin" user={administratorUser} reset={reset} onLogout={logout}><AdminOverview state={state} update={update} accessToken={session.accessToken}/></Shell>;
-  if(pathname==="/admin/ballots/new"&&session?.role==="admin") return <Shell role="admin" user={administratorUser} reset={reset} onLogout={logout}><AdminBallotBuilder accessToken={session.accessToken}/></Shell>;
-  if(pathname==="/admin/ballots"&&session?.role==="admin") return <Shell role="admin" user={administratorUser} reset={reset} onLogout={logout}><AdminBallotList accessToken={session.accessToken}/></Shell>;
-  if(pathname==="/admin/anomalies") return <Shell role="admin" user={administratorUser} reset={reset} onLogout={logout}><AnomalyConsole state={state} update={update}/></Shell>;
-  if(pathname==="/admin/results") return <Shell role="admin" user={administratorUser} reset={reset} onLogout={logout}><Results state={state} admin update={update}/></Shell>;
-  if(pathname==="/admin/ledger") return <Shell role="admin" user={administratorUser} reset={reset} onLogout={logout}><Ledger state={state} admin/></Shell>;
-  return <NotFound/>;
+  useEffect(() => {
+    const context = (document as Document & { modelContext?: ToolContext }).modelContext;
+    if (!context?.registerTool) return;
+    const lifecycle = new AbortController();
+    const register = async () => {
+      await context.registerTool({
+        name: "navigate_quorum",
+        title: "Open Quorum area",
+        description: "Navigate to a named Quorum area.",
+        inputSchema: { type: "object", properties: { area: { type: "string", enum: ["login", "student-dashboard", "student-nominations", "student-vote", "public-verify", "public-results", "admin-overview", "admin-ballots", "admin-anomalies", "admin-results"] } }, required: ["area"], additionalProperties: false },
+        annotations: { readOnlyHint: true, untrustedContentHint: false },
+        execute: (input: unknown) => {
+          const map: Record<string, string> = { login: "/", "student-dashboard": "/student/dashboard", "student-nominations": "/student/nominations", "student-vote": "/student/vote", "public-verify": "/public/verify", "public-results": "/public/results", "admin-overview": "/admin/overview", "admin-ballots": "/admin/ballots", "admin-anomalies": "/admin/anomalies", "admin-results": "/admin/results" };
+          const area = (input as { area?: string }).area;
+          if (!area || !map[area]) throw new Error("Unknown area");
+          router.push(map[area]);
+          return { path: map[area] };
+        },
+      }, { signal: lifecycle.signal });
+      await context.registerTool({
+        name: "verify_quorum_receipt",
+        title: "Verify receipt",
+        description: "Check whether a Quorum receipt is present in the anonymous ledger.",
+        inputSchema: { type: "object", properties: { receipt: { type: "string" } }, required: ["receipt"], additionalProperties: false },
+        annotations: { readOnlyHint: true, untrustedContentHint: false },
+        execute: async (input: unknown) => {
+          const receipt = (input as { receipt?: string }).receipt?.trim();
+          if (!receipt) throw new Error("Receipt is required");
+          const result = await verifyPublicReceipt(receipt);
+          return { recorded: true, status: result.status, recordedAt: result.recordedAt, ballotTitle: result.ballotTitle, revealsIdentity: false, revealsCandidate: false };
+        },
+      }, { signal: lifecycle.signal });
+    };
+    void register().catch(() => {});
+    return () => lifecycle.abort();
+  }, [router]);
+
+  if (!authReady || !hydrated || (pathname === "/" && session)) return <div className="min-h-screen bg-[#15101c]" />;
+  if (pathname === "/") return <Login onAuthenticated={authenticated} />;
+  if (pathname === "/public/verify") return <PublicPage><Ledger /></PublicPage>;
+  if (pathname === "/public/results") return <PublicPage><PublicResults /></PublicPage>;
+  if (pathname.startsWith("/student/") && session?.role !== "student") return <NotFound />;
+  if (pathname.startsWith("/admin/") && session?.role !== "admin") return <NotFound />;
+
+  const studentUser = session?.role === "student" ? session.user : undefined;
+  const administratorUser = session?.role === "admin" ? session.user : undefined;
+
+  if (pathname === "/student/dashboard" && studentUser && session?.role === "student") return <Shell role="student" user={studentUser} onLogout={logout}><StudentBallotDashboard accessToken={session.accessToken} user={studentUser} /></Shell>;
+  if (pathname === "/student/nominations" && studentUser && session?.role === "student") return <Shell role="student" user={studentUser} onLogout={logout}><StudentNominations accessToken={session.accessToken} user={studentUser} /></Shell>;
+  if (pathname === "/student/vote" && session?.role === "student") return <Shell role="student" user={studentUser} onLogout={logout}><StudentVoting state={state} update={update} accessToken={session.accessToken} /></Shell>;
+  if (pathname === "/student/ledger") return <Shell role="student" user={studentUser} onLogout={logout}><Ledger initialReceipt={state.receipt} /></Shell>;
+  if (pathname === "/student/results") return <Shell role="student" user={studentUser} onLogout={logout}><PublicResults /></Shell>;
+  if (pathname === "/admin/overview" && session?.role === "admin") return <Shell role="admin" user={administratorUser} onLogout={logout}><AdminOperationsOverview accessToken={session.accessToken} /></Shell>;
+  if (pathname === "/admin/ballots/new" && session?.role === "admin") return <Shell role="admin" user={administratorUser} onLogout={logout}><AdminBallotBuilder accessToken={session.accessToken} /></Shell>;
+  if (pathname === "/admin/ballots" && session?.role === "admin") return <Shell role="admin" user={administratorUser} onLogout={logout}><AdminBallotList accessToken={session.accessToken} /></Shell>;
+  if (pathname === "/admin/anomalies" && session?.role === "admin") return <Shell role="admin" user={administratorUser} onLogout={logout}><AdminAnomalyBoard accessToken={session.accessToken} /></Shell>;
+  if (pathname === "/admin/results" && session?.role === "admin") return <Shell role="admin" user={administratorUser} onLogout={logout}><AdminTallyWorkspace accessToken={session.accessToken} /></Shell>;
+  if (pathname === "/admin/ledger") return <Shell role="admin" user={administratorUser} onLogout={logout}><Ledger admin /></Shell>;
+  return <NotFound />;
 }

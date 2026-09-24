@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: quorum-express-api
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build:api
+    startCommand: npm run start --workspace @quorum/express-api
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AI_SERVICE_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MANIFESTO_MODEL
+        value: openai/gpt-oss-20b
+      - key: BLIND_SIGNING_KEY_DIRECTORY
+        value: /var/data/blind-keys
+      - key: DEV_ADMIN_EMAIL
+        sync: false
+      - key: DEV_ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: blind-signing-keys
+      mountPath: /var/data
+      sizeGB: 1
+
+  - type: web
+    name: quorum-ai-service
+    runtime: python
+    plan: starter
+    rootDir: apps/ai-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: ANOMALY_QUARANTINE_THRESHOLD
+        value: "0.75"
+      - key: ANOMALY_MODEL_VERSION
+        value: isolation-forest-v1

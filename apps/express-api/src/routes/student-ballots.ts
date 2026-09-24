@@ -3,8 +3,6 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import type {
   ApiSuccess,
-  PersistedBallotPhase,
-  PersistedBallotScope,
   StudentBallotRecord,
   StudentCandidateRecord
 } from "@quorum/shared";
@@ -15,6 +13,7 @@ import {
 import { getPrismaClient } from "../lib/prisma.js";
 import { getSupabaseAdminClient } from "../lib/supabase.js";
 import { storedHighlights, storedTopics } from "../lib/manifesto-intelligence.js";
+import { ballotRecord } from "../lib/ballot-record.js";
 
 const router = Router();
 router.use(requireAuthentication);
@@ -71,13 +70,6 @@ export function isStudentEligible(
   return false;
 }
 
-function ballotPhase(startTime: Date, endTime: Date): PersistedBallotPhase {
-  const now = new Date();
-  if (now < startTime) return "NOMINATIONS_OPEN";
-  if (now <= endTime) return "VOTING_OPEN";
-  return "CLOSED";
-}
-
 function storageLocation(photoUrl: string): { bucket: string; path: string } | null {
   const prefix = "supabase-storage://";
   if (!photoUrl.startsWith(prefix)) return null;
@@ -130,24 +122,12 @@ router.get("/", async (request: AuthenticatedRequest, response) => {
 
   const ballots = await prisma.ballot.findMany({
     orderBy: { createdAt: "desc" },
-    include: { _count: { select: { candidates: true } } }
+    include: { _count: { select: { candidates: true, runoffs: true } } }
   });
 
   const eligibleBallots: StudentBallotRecord[] = ballots
     .filter(ballot => isStudentEligible(ballot, student))
-    .map(ballot => ({
-      id: ballot.id,
-      title: ballot.title,
-      description: ballot.description,
-      scopeType: ballot.scopeType as PersistedBallotScope,
-      scopeTarget: ballot.scopeTarget,
-      startTime: ballot.startTime.toISOString(),
-      endTime: ballot.endTime.toISOString(),
-      createdAt: ballot.createdAt.toISOString(),
-      phase: ballotPhase(ballot.startTime, ballot.endTime),
-      candidateCount: ballot._count.candidates,
-      eligible: true
-    }));
+    .map(ballot => ({ ...ballotRecord(ballot), eligible: true as const }));
 
   const result: ApiSuccess<StudentBallotRecord[]> = { data: eligibleBallots };
   response.json(result);
@@ -180,7 +160,7 @@ router.get("/:ballotId/candidates", async (request: AuthenticatedRequest, respon
     candidacyStatement: candidate.candidacyStatement,
     manifestoText: candidate.manifestoText,
     manifestoHighlights: storedHighlights(candidate.aiSummary, candidate.manifestoText),
-    manifestoTopics: storedTopics(candidate.aiSummary),
+    manifestoTopics: storedTopics(candidate.aiSummary, candidate.manifestoText),
     isCurrentStudent: candidate.student.id === request.auth?.sub
   }));
   const result: ApiSuccess<StudentCandidateRecord[]> = { data };

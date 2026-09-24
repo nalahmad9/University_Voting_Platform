@@ -3,14 +3,13 @@ import { z } from "zod";
 import type {
   ApiSuccess,
   BallotRecord,
-  PersistedBallotPhase,
-  PersistedBallotScope
 } from "@quorum/shared";
 import {
   requireAdministrator,
   requireAuthentication
 } from "../middleware/authentication.js";
 import { getPrismaClient } from "../lib/prisma.js";
+import { ballotRecord } from "../lib/ballot-record.js";
 
 const scopeSchema = z.enum(["GLOBAL", "DEPARTMENTAL", "SENIOR", "CLUB", "COMBINED"]);
 
@@ -48,44 +47,12 @@ const createBallotSchema = z.object({
 const router = Router();
 router.use(requireAuthentication, requireAdministrator);
 
-function ballotPhase(startTime: Date, endTime: Date): PersistedBallotPhase {
-  const now = new Date();
-  if (now < startTime) return "NOMINATIONS_OPEN";
-  if (now <= endTime) return "VOTING_OPEN";
-  return "CLOSED";
-}
-
-function ballotResponse(ballot: {
-  id: string;
-  title: string;
-  description: string | null;
-  scopeType: string;
-  scopeTarget: string | null;
-  startTime: Date;
-  endTime: Date;
-  createdAt: Date;
-  _count: { candidates: number };
-}): BallotRecord {
-  return {
-    id: ballot.id,
-    title: ballot.title,
-    description: ballot.description,
-    scopeType: ballot.scopeType as PersistedBallotScope,
-    scopeTarget: ballot.scopeTarget,
-    startTime: ballot.startTime.toISOString(),
-    endTime: ballot.endTime.toISOString(),
-    createdAt: ballot.createdAt.toISOString(),
-    phase: ballotPhase(ballot.startTime, ballot.endTime),
-    candidateCount: ballot._count.candidates
-  };
-}
-
 router.get("/", async (_request, response) => {
   const ballots = await getPrismaClient().ballot.findMany({
     orderBy: { createdAt: "desc" },
-    include: { _count: { select: { candidates: true } } }
+    include: { _count: { select: { candidates: true, runoffs: true } } }
   });
-  const result: ApiSuccess<BallotRecord[]> = { data: ballots.map(ballotResponse) };
+  const result: ApiSuccess<BallotRecord[]> = { data: ballots.map(ballotRecord) };
   response.json(result);
 });
 
@@ -111,10 +78,10 @@ router.post("/", async (request, response) => {
       startTime: new Date(parsed.data.startTime),
       endTime: new Date(parsed.data.endTime)
     },
-    include: { _count: { select: { candidates: true } } }
+    include: { _count: { select: { candidates: true, runoffs: true } } }
   });
 
-  const result: ApiSuccess<BallotRecord> = { data: ballotResponse(ballot) };
+  const result: ApiSuccess<BallotRecord> = { data: ballotRecord(ballot) };
   response.status(201).json(result);
 });
 

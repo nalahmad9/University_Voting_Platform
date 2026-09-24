@@ -60,3 +60,7 @@ __pycache__/
 # Private local seed photographs
 apps/express-api/prisma/seed-assets/*
 !apps/express-api/prisma/seed-assets/.gitkeep
+
+**/node_modules/
+*.tsbuildinfo
+**/pytest-cache-files-*/

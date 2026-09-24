@@ -70,7 +70,7 @@ export interface AuthenticatedAdministrator {
 
 export type PersistedBallotScope = "GLOBAL" | "DEPARTMENTAL" | "SENIOR" | "CLUB" | "COMBINED";
 
-export type PersistedBallotPhase = "NOMINATIONS_OPEN" | "VOTING_OPEN" | "CLOSED";
+export type PersistedBallotPhase = "NOMINATIONS_OPEN" | "UPCOMING" | "VOTING_OPEN" | "CLOSED";
 
 export interface BallotRecord {
   id: string;
@@ -83,6 +83,10 @@ export interface BallotRecord {
   createdAt: string;
   phase: PersistedBallotPhase;
   candidateCount: number;
+  resultsPublishedAt: string | null;
+  runoffOfBallotId: string | null;
+  roundNumber: number;
+  hasRunoff: boolean;
 }
 
 export interface StudentBallotRecord extends BallotRecord {
@@ -201,6 +205,82 @@ export interface CastVoteResult {
   receipt: string;
   recordedAt: string;
   status: "RECORDED" | "QUARANTINED";
+}
+
+export interface ReceiptVerificationResult {
+  receipt: string;
+  recordedAt: string;
+  status: "RECORDED" | "UNDER_REVIEW";
+  ballotTitle: string;
+  revealsIdentity: false;
+  revealsCandidate: false;
+}
+
+export type AnomalyReviewStatus = "PENDING" | "RESTORED" | "CONFIRMED";
+
+export interface AdminAnomalyRecord {
+  id: string;
+  ballotId: string;
+  ballotTitle: string;
+  receiptPrefix: string;
+  anomalyScore: number;
+  riskFeatures: AnonymousRiskFeatures & { requestRateBucket: "normal" | "elevated" | "high" };
+  modelVersion: string;
+  reviewStatus: AnomalyReviewStatus;
+  reviewReason: string | null;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  recordedAt: string;
+}
+
+export interface BallotTallyCandidate {
+  candidateId: string;
+  candidateName: string;
+  voteCount: number;
+  percentage: number;
+}
+
+export interface BallotTallyResult {
+  ballotId: string;
+  ballotTitle: string;
+  acceptedVotes: number;
+  quarantinedVotes: number;
+  pendingReviewCount: number;
+  totalVotes: number;
+  candidates: BallotTallyCandidate[];
+  tie: boolean;
+}
+
+export type PublishedResultOutcome = "WINNER" | "TIE" | "NO_VOTES";
+
+export interface PublishedResultSnapshot {
+  outcome: PublishedResultOutcome;
+  winnerCandidateId: string | null;
+  tiedCandidateIds: string[];
+  acceptedVotes: number;
+  quarantinedVotes: number;
+  totalVotes: number;
+  candidates: BallotTallyCandidate[];
+}
+
+export interface PublishedBallotResult extends PublishedResultSnapshot {
+  ballotId: string;
+  ballotTitle: string;
+  publishedAt: string;
+  roundNumber: number;
+  runoffOfBallotId: string | null;
+  runoffBallot: {
+    id: string;
+    title: string;
+    startTime: string;
+    endTime: string;
+    roundNumber: number;
+  } | null;
+}
+
+export interface CreateRunoffRequest {
+  startTime: string;
+  endTime: string;
 }
 
 export interface CreateBallotRequest {

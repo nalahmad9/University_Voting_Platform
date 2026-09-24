@@ -12,7 +12,11 @@ import {
   requireAuthentication
 } from "../middleware/authentication.js";
 import { getPrismaClient } from "../lib/prisma.js";
-import { recordManifestoReview, storedHighlights } from "../lib/manifesto-intelligence.js";
+import {
+  isExactManifestoExcerpt,
+  recordManifestoReview,
+  storedHighlights
+} from "../lib/manifesto-intelligence.js";
 
 const reviewSchema = z.object({
   decision: z.enum(["APPROVE", "REJECT"]),
@@ -120,6 +124,7 @@ function nominationResponse(nomination: NominationWithRelations): AdminNominatio
 
 router.get("/", async (_request, response) => {
   const nominations = await getPrismaClient().candidate.findMany({
+    where: { ballot: { runoffOfBallotId: null } },
     orderBy: { createdAt: "desc" },
     include: nominationInclude
   });
@@ -182,6 +187,17 @@ router.patch("/:nominationId/review", async (request, response) => {
   }
 
   const approved = review.data.decision === "APPROVE";
+  if (approved && review.data.manifestoHighlights?.some(
+    highlight => !isExactManifestoExcerpt(highlight, current.manifestoText)
+  )) {
+    response.status(400).json({
+      error: {
+        code: "HIGHLIGHTS_NOT_GROUNDED",
+        message: "Every manifesto highlight must use exact wording from the submitted manifesto"
+      }
+    });
+    return;
+  }
   const updated = await prisma.candidate.update({
     where: { id: current.id },
     data: approved

@@ -6,6 +6,8 @@ import { ArrowLeft, ArrowRight, CalendarDays, ChevronDown, Plus, RefreshCw, Vote
 import type { BallotRecord, PersistedBallotScope } from "@quorum/shared";
 import { BallotApiError, createBallot, listAdministratorBallots } from "@/lib/ballots-client";
 import { AdminNominationReview } from "@/components/admin-nomination-review";
+import { DateTimePicker } from "@/components/date-time-picker";
+import { QuorumSelect } from "@/components/quorum-select";
 
 const fieldClass = "mt-2 w-full rounded-xl border border-[#d8cebd] bg-white px-4 py-3 text-[#211a22] outline-none focus:border-[#8f2f43] focus:ring-2 focus:ring-[#8f2f43]/20";
 const primaryButton = "inline-flex items-center justify-center gap-2 rounded-xl bg-[#8f2f43] px-5 py-3 font-bold text-white transition hover:bg-[#742437] disabled:cursor-not-allowed disabled:opacity-50";
@@ -24,11 +26,7 @@ function initialVotingTime(daysFromNow: number): string {
   return localDateTimeValue(date);
 }
 
-function defaultTarget(scope: PersistedBallotScope): string {
-  if (scope === "DEPARTMENTAL") return "Computer Science";
-  if (scope === "SENIOR") return "4";
-  if (scope === "CLUB") return "Robotics Society";
-  if (scope === "COMBINED") return "department=Computer Science;classYear=4";
+function defaultTarget(): string {
   return "";
 }
 
@@ -42,6 +40,7 @@ function scopeLabel(scope: PersistedBallotScope, target: string | null): string 
 
 function phasePresentation(phase: BallotRecord["phase"]): { label: string; className: string } {
   if (phase === "NOMINATIONS_OPEN") return { label: "Nominations open", className: "bg-[#ece9ff] text-[#6550b5]" };
+  if (phase === "UPCOMING") return { label: "Runoff scheduled", className: "bg-[#edf3f7] text-[#36586a]" };
   if (phase === "VOTING_OPEN") return { label: "Voting open", className: "bg-[#e0f4ed] text-[#17745a]" };
   return { label: "Closed", className: "bg-[#ece9e5] text-[#5e5752]" };
 }
@@ -60,7 +59,7 @@ export function AdminBallotBuilder({ accessToken }: { accessToken: string }) {
 
   const chooseScope = (scope: PersistedBallotScope) => {
     setScopeType(scope);
-    setScopeTarget(defaultTarget(scope));
+    setScopeTarget(defaultTarget());
   };
 
   const continueFromDetails = () => {
@@ -110,8 +109,8 @@ export function AdminBallotBuilder({ accessToken }: { accessToken: string }) {
     <div className="mt-8 grid grid-cols-3 gap-2 rounded-xl bg-[#e9e1d4] p-1 text-center text-sm font-bold">{[["details","1. Details"],["schedule","2. Scope & schedule"],["review","3. Review"]].map(([value,label])=><div key={value} className={`rounded-lg px-3 py-3 ${step===value?"bg-white text-[#211a22] shadow-sm":"text-[#756d66]"}`}>{label}</div>)}</div>
     <section className={`${cardClass} mt-5 p-6 sm:p-8`}>
       {step==="details"&&<><h2 className="text-3xl font-bold">Ballot details</h2><label className="mt-6 block font-semibold">Ballot title<input value={title} maxLength={150} onChange={event=>setTitle(event.target.value)} className={fieldClass}/></label><label className="mt-5 block font-semibold">Description<textarea value={description} maxLength={2000} onChange={event=>setDescription(event.target.value)} rows={5} className={fieldClass}/></label><div className="mt-6 flex justify-end"><button onClick={continueFromDetails} className={primaryButton}>Continue <ArrowRight size={17}/></button></div></>}
-      {step==="schedule"&&<><h2 className="text-3xl font-bold">Scope and schedule</h2><div className="mt-6 grid gap-5 sm:grid-cols-2"><label className="font-semibold">Eligibility scope<select value={scopeType} onChange={event=>chooseScope(event.target.value as PersistedBallotScope)} className={fieldClass}><option value="GLOBAL">Global — every eligible student</option><option value="DEPARTMENTAL">Department</option><option value="SENIOR">Class year</option><option value="CLUB">Club or organization</option><option value="COMBINED">Combined rules</option></select></label>{scopeType!=="GLOBAL"&&<label className="font-semibold">Scope target<input value={scopeTarget} onChange={event=>setScopeTarget(event.target.value)} className={fieldClass}/></label>}<label className="font-semibold">Voting opens<input type="datetime-local" value={startTime} onChange={event=>setStartTime(event.target.value)} className={fieldClass}/></label><label className="font-semibold">Voting closes<input type="datetime-local" value={endTime} onChange={event=>setEndTime(event.target.value)} className={fieldClass}/></label></div><div className="mt-5 rounded-xl border border-[#e3ca92] bg-[#fff6d9] p-4 text-sm text-[#6e5a34]">Nominations open as soon as you post this ballot and close when voting begins. Results remain unpublished until administrator review.</div><div className="mt-6 flex justify-between"><button onClick={()=>setStep("details")} className={secondaryButton}><ArrowLeft size={17}/>Back</button><button onClick={continueFromSchedule} className={primaryButton}>Review ballot <ArrowRight size={17}/></button></div></>}
-      {step==="review"&&<><h2 className="text-3xl font-bold">Review before posting</h2><div className="mt-6 grid gap-4 rounded-2xl bg-[#f5f1e8] p-5 sm:grid-cols-2"><div><span className="text-sm text-[#7c746d]">Ballot</span><strong className="block">{title}</strong></div><div><span className="text-sm text-[#7c746d]">Eligibility</span><strong className="block">{scopeLabel(scopeType,scopeTarget||null)}</strong></div><div><span className="text-sm text-[#7c746d]">Nominations</span><strong className="block">Open immediately until voting starts</strong></div><div><span className="text-sm text-[#7c746d]">Voting</span><strong className="block">{new Date(startTime).toLocaleString()} – {new Date(endTime).toLocaleString()}</strong></div></div><div className="mt-5 rounded-xl border border-[#e3ca92] bg-[#fff6d9] p-4 text-sm">Eligible students will see this ballot and receive a new-ballot notification as soon as it is posted.</div><div className="mt-6 flex justify-between"><button onClick={()=>setStep("schedule")} className={secondaryButton}><ArrowLeft size={17}/>Back</button><button disabled={submitting} onClick={()=>void save()} className={primaryButton}>{submitting?"Posting…":"Post ballot"}</button></div></>}
+      {step==="schedule"&&<><h2 className="text-3xl font-bold">Scope and schedule</h2><div className="mt-6 grid gap-5 sm:grid-cols-2"><label className="font-semibold">Eligibility scope<QuorumSelect ariaLabel="Eligibility scope" value={scopeType} onValueChange={value=>chooseScope(value as PersistedBallotScope)} options={[{value:"GLOBAL",label:"Global — every eligible student"},{value:"DEPARTMENTAL",label:"Department"},{value:"SENIOR",label:"Class year"},{value:"CLUB",label:"Club or organization"},{value:"COMBINED",label:"Combined rules"}]}/></label>{scopeType!=="GLOBAL"&&<label className="font-semibold">Scope target<input value={scopeTarget} onChange={event=>setScopeTarget(event.target.value)} className={fieldClass}/></label>}<label className="font-semibold">Voting opens<DateTimePicker ariaLabel="Voting opens" value={startTime} onChange={setStartTime}/></label><label className="font-semibold">Voting closes<DateTimePicker ariaLabel="Voting closes" value={endTime} onChange={setEndTime}/></label></div><div className="mt-5 rounded-xl border border-[#e3ca92] bg-[#fff6d9] p-4 text-sm text-[#6e5a34]">Nominations open as soon as you post this ballot and close when voting begins. Results remain unpublished until administrator review.</div><div className="mt-6 flex justify-between"><button onClick={()=>setStep("details")} className={secondaryButton}><ArrowLeft size={17}/>Back</button><button onClick={continueFromSchedule} className={primaryButton}>Review ballot <ArrowRight size={17}/></button></div></>}
+      {step==="review"&&<><h2 className="text-3xl font-bold">Review before posting</h2><div className="mt-6 grid gap-4 rounded-2xl bg-[#f5f1e8] p-5 sm:grid-cols-2"><div><span className="text-sm text-[#7c746d]">Ballot</span><strong className="block">{title}</strong></div><div><span className="text-sm text-[#7c746d]">Eligibility</span><strong className="block">{scopeLabel(scopeType,scopeTarget||null)}</strong></div><div><span className="text-sm text-[#7c746d]">Nominations</span><strong className="block">Open immediately until voting starts</strong></div><div><span className="text-sm text-[#7c746d]">Voting</span><strong className="block">{new Date(startTime).toLocaleString()} – {new Date(endTime).toLocaleString()}</strong></div></div><div className="mt-5 rounded-xl border border-[#e3ca92] bg-[#fff6d9] p-4 text-sm">Eligible students will see the ballot and a new-ballot notice on their dashboard as soon as it is posted.</div><div className="mt-6 flex justify-between"><button onClick={()=>setStep("schedule")} className={secondaryButton}><ArrowLeft size={17}/>Back</button><button disabled={submitting} onClick={()=>void save()} className={primaryButton}>{submitting?"Posting…":"Post ballot"}</button></div></>}
       {error&&<p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-800">{error}</p>}
     </section>
   </>;

@@ -34,6 +34,16 @@ const resultSchema = z.object({
 type ManifestoResult = z.infer<typeof resultSchema>;
 type ReviewDecision = "APPROVED" | "REJECTED";
 
+const TOPIC_KEYWORDS: Record<(typeof MANIFESTO_TOPICS)[number], string[]> = {
+  "Transparency and accountability": ["transparent", "accountab", "progress dashboard", "meeting summaries", "budget", "publish"],
+  "Student welfare": ["wellbeing", "well-being", "counselling", "mental health", "mental-health", "financial assistance", "peer wellbeing"],
+  "Access and inclusion": ["accessib", "inclusion", "inclusive", "caption", "hybrid participation"],
+  "Academic and career support": ["academic", "career", "internship", "tutoring", "scholarship", "adviser", "workshop"],
+  "Campus services": ["campus", "transport", "cafeteria", "laborator", "library", "study space", "maintenance"],
+  "Sustainability": ["sustainab", "recycling", "refill", "single-use", "environment"],
+  "Clubs and community": ["club", "community", "events calendar", "volunteering", "student organization"]
+};
+
 type StoredIntelligence = ManifestoResult & {
   version: 1;
   generation: {
@@ -71,15 +81,52 @@ function excerptsFromManifesto(manifesto: string): [string, string, string] {
   return parts.slice(0, 3).map(part => part.slice(0, 180)) as [string, string, string];
 }
 
+function boundedExcerpt(value: string, maximumLength: number): string {
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (clean.length <= maximumLength) return clean;
+  const shortened = clean.slice(0, maximumLength);
+  const boundary = shortened.lastIndexOf(" ");
+  return shortened.slice(0, boundary >= 5 ? boundary : maximumLength).trim();
+}
+
+function topicExcerptsFromManifesto(manifesto: string): ManifestoResult["topics"] {
+  const units = manifesto
+    .split(/\r?\n+/)
+    .flatMap(line => line.split(/(?<=[.!?])\s+/))
+    .map(unit => unit.trim())
+    .filter(unit => unit.length >= 5);
+
+  return Object.fromEntries(MANIFESTO_TOPICS.map(topic => {
+    const topicPrefix = `${topic.toLocaleLowerCase()}:`;
+    const labelled = units.find(unit => unit.toLocaleLowerCase().startsWith(topicPrefix));
+    if (labelled) {
+      const excerpt = boundedExcerpt(labelled.slice(labelled.indexOf(":") + 1), 220);
+      if (excerpt.length >= 5) return [topic, excerpt];
+    }
+
+    const keywords = TOPIC_KEYWORDS[topic];
+    const matching = units.find(unit => {
+      const normalized = unit.toLocaleLowerCase();
+      return keywords.some(keyword => normalized.includes(keyword));
+    });
+    return [topic, matching ? boundedExcerpt(matching, 220) : "Not addressed"];
+  })) as ManifestoResult["topics"];
+}
+
 function fallback(manifesto: string): ManifestoResult {
   return {
     highlights: excerptsFromManifesto(manifesto),
-    topics: Object.fromEntries(MANIFESTO_TOPICS.map(topic => [topic, "Not addressed"])) as ManifestoResult["topics"]
+    topics: topicExcerptsFromManifesto(manifesto)
   };
 }
 
 function normalizedSource(value: string): string {
   return value.toLocaleLowerCase().replace(/\s+/g, " ").trim();
+}
+
+export function isExactManifestoExcerpt(excerpt: string, manifesto: string): boolean {
+  const normalizedExcerpt = normalizedSource(excerpt);
+  return normalizedExcerpt.length >= 5 && normalizedSource(manifesto).includes(normalizedExcerpt);
 }
 
 function isGrounded(result: ManifestoResult, manifesto: string): boolean {
@@ -89,29 +136,6 @@ function isGrounded(result: ManifestoResult, manifesto: string): boolean {
     ...Object.values(result.topics).filter(value => value !== "Not addressed")
   ];
   return claims.every(claim => source.includes(normalizedSource(claim)));
-}
-
-function schemaDefinition() {
-  const topicProperties = Object.fromEntries(MANIFESTO_TOPICS.map(topic => [topic, { type: "string", minLength: 5, maxLength: 220 }]));
-  return {
-    type: "object",
-    properties: {
-      highlights: {
-        type: "array",
-        items: { type: "string", minLength: 5, maxLength: 180 },
-        minItems: 3,
-        maxItems: 3
-      },
-      topics: {
-        type: "object",
-        properties: topicProperties,
-        required: [...MANIFESTO_TOPICS],
-        additionalProperties: false
-      }
-    },
-    required: ["highlights", "topics"],
-    additionalProperties: false
-  } as const;
 }
 
 export async function generateManifestoIntelligence(manifesto: string): Promise<StoredIntelligence> {
@@ -139,19 +163,13 @@ export async function generateManifestoIntelligence(manifesto: string): Promise<
             "Every highlight and topic position must be copied as an exact contiguous excerpt from the submitted manifesto.",
             "Do not infer intentions, add promises, praise the candidate, or use outside knowledge.",
             "Select exactly three concise, distinct excerpts as highlights, without quotation marks.",
-            "For every comparison topic, copy one short exact excerpt or write exactly 'Not addressed'."
+            "For every comparison topic, copy one short exact excerpt or write exactly 'Not addressed'.",
+            `Return only one JSON object with a highlights array and a topics object. The topics object must contain exactly these keys: ${MANIFESTO_TOPICS.join(", ")}.`
           ].join(" ")
         },
         { role: "user", content: `Submitted manifesto:\n\n${manifesto}` }
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "manifesto_intelligence",
-          strict: true,
-          schema: schemaDefinition()
-        }
-      }
+      response_format: { type: "json_object" }
     });
     const content = completion.choices[0]?.message?.content;
     const parsed = resultSchema.parse(JSON.parse(content ?? ""));
@@ -207,8 +225,10 @@ export function storedHighlights(value: Prisma.JsonValue | null, manifesto: stri
   return excerptsFromManifesto(manifesto);
 }
 
-export function storedTopics(value: Prisma.JsonValue | null): Record<string, string> {
-  return storedObject(value)?.topics ?? Object.fromEntries(MANIFESTO_TOPICS.map(topic => [topic, "Not addressed"]));
+export function storedTopics(value: Prisma.JsonValue | null, manifesto: string): Record<string, string> {
+  const stored = storedObject(value)?.topics;
+  if (stored && Object.values(stored).some(position => position !== "Not addressed")) return stored;
+  return topicExcerptsFromManifesto(manifesto);
 }
 
 export function recordManifestoReview(

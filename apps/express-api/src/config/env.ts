@@ -15,6 +15,8 @@ const environmentSchema = z.object({
   GROQ_API_KEY: z.string().min(1).optional(),
   GROQ_MANIFESTO_MODEL: z.string().min(1).default("openai/gpt-oss-20b"),
   GROQ_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(15000),
+  AI_SERVICE_URL: z.string().url().default("http://localhost:8000"),
+  AI_SERVICE_TIMEOUT_MS: z.coerce.number().int().min(100).max(10000).default(1500),
   PROFILE_PHOTOS_BUCKET: z.string().min(1).default("profile-photos"),
   DEV_ADMIN_NAME: z.string().min(1).default("Election Administrator"),
   DEV_ADMIN_EMAIL: z.string().email().optional(),

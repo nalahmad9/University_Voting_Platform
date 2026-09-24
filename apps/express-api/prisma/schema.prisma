@@ -25,19 +25,26 @@ model Student {
 }
 
 model Ballot {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  title       String      @db.VarChar(150)
-  description String?
-  scopeType   String      @map("scope_type") @db.VarChar(20)
-  scopeTarget String?     @map("scope_target") @db.VarChar(100)
-  startTime   DateTime    @map("start_time") @db.Timestamptz(6)
-  endTime     DateTime    @map("end_time") @db.Timestamptz(6)
-  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  candidates  Candidate[]
-  voterLogs   VoterLog[]
-  voteHashes  VoteHash[]
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title              String      @db.VarChar(150)
+  description        String?
+  scopeType          String      @map("scope_type") @db.VarChar(20)
+  scopeTarget        String?     @map("scope_target") @db.VarChar(100)
+  startTime          DateTime    @map("start_time") @db.Timestamptz(6)
+  endTime            DateTime    @map("end_time") @db.Timestamptz(6)
+  resultsPublishedAt DateTime?   @map("results_published_at") @db.Timestamptz(6)
+  publishedResults   Json?       @map("published_results")
+  runoffOfBallotId   String?     @unique(map: "ballots_runoff_of_unique") @map("runoff_of_ballot_id") @db.Uuid
+  roundNumber        Int         @default(1) @map("round_number")
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  candidates         Candidate[]
+  voterLogs          VoterLog[]
+  voteHashes         VoteHash[]
+  runoffOf           Ballot?     @relation("BallotRunoffs", fields: [runoffOfBallotId], references: [id], onDelete: Restrict)
+  runoffs            Ballot[]    @relation("BallotRunoffs")
 
   @@index([startTime, endTime], map: "ballots_voting_window_idx")
+  @@index([resultsPublishedAt], map: "ballots_results_published_idx")
   @@map("ballots")
 }
 
@@ -86,11 +93,18 @@ model VoteHash {
   timeTakenSeconds Int       @map("time_taken_seconds")
   anomalyScore     Decimal   @map("anomaly_score") @db.Decimal(5, 4)
   isQuarantined    Boolean   @default(false) @map("is_quarantined")
+  riskFeatures     Json      @default("{}") @map("risk_features")
+  anomalyModelVersion String @default("legacy") @map("anomaly_model_version") @db.VarChar(80)
+  reviewStatus     String    @default("NOT_REQUIRED") @map("review_status") @db.VarChar(20)
+  reviewReason     String?   @map("review_reason")
+  reviewedAt       DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedBy       String?   @map("reviewed_by") @db.VarChar(150)
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   ballot           Ballot    @relation(fields: [ballotId], references: [id], onDelete: Restrict)
   candidate        Candidate @relation("CandidateVotes", fields: [ballotId, candidateId], references: [ballotId, id], onDelete: Restrict)
 
   @@index([ballotId, candidateId], map: "vote_hashes_ballot_candidate_idx")
   @@index([ballotId, isQuarantined], map: "vote_hashes_ballot_quarantine_idx")
+  @@index([reviewStatus, createdAt], map: "vote_hashes_review_status_idx")
   @@map("vote_hashes")
 }

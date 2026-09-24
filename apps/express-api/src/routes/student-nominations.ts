@@ -3,7 +3,6 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import type {
   ApiSuccess,
-  PersistedBallotPhase,
   PersistedBallotScope,
   PersistedNominationStatus,
   StudentBallotRecord,
@@ -17,6 +16,7 @@ import {
 import { getPrismaClient } from "../lib/prisma.js";
 import { isStudentEligible } from "./student-ballots.js";
 import { generateManifestoIntelligence } from "../lib/manifesto-intelligence.js";
+import { ballotPhase } from "../lib/ballot-record.js";
 
 const createNominationSchema = z.object({
   ballotId: z.string().uuid(),
@@ -38,13 +38,6 @@ function requireStudent(request: AuthenticatedRequest, response: Parameters<Para
   return true;
 }
 
-function ballotPhase(startTime: Date, endTime: Date): PersistedBallotPhase {
-  const now = new Date();
-  if (now < startTime) return "NOMINATIONS_OPEN";
-  if (now <= endTime) return "VOTING_OPEN";
-  return "CLOSED";
-}
-
 function ballotRecord(ballot: {
   id: string;
   title: string;
@@ -54,7 +47,10 @@ function ballotRecord(ballot: {
   startTime: Date;
   endTime: Date;
   createdAt: Date;
-  _count: { candidates: number };
+  resultsPublishedAt: Date | null;
+  runoffOfBallotId: string | null;
+  roundNumber: number;
+  _count: { candidates: number; runoffs: number };
 }): StudentBallotRecord {
   return {
     id: ballot.id,
@@ -65,8 +61,12 @@ function ballotRecord(ballot: {
     startTime: ballot.startTime.toISOString(),
     endTime: ballot.endTime.toISOString(),
     createdAt: ballot.createdAt.toISOString(),
-    phase: ballotPhase(ballot.startTime, ballot.endTime),
+    phase: ballotPhase(ballot.startTime, ballot.endTime, ballot.runoffOfBallotId),
     candidateCount: ballot._count.candidates,
+    resultsPublishedAt: ballot.resultsPublishedAt?.toISOString() ?? null,
+    runoffOfBallotId: ballot.runoffOfBallotId,
+    roundNumber: ballot.roundNumber,
+    hasRunoff: ballot._count.runoffs > 0,
     eligible: true
   };
 }
@@ -107,9 +107,9 @@ router.get("/", async (request: AuthenticatedRequest, response) => {
 
   const ballots = await prisma.ballot.findMany({
     orderBy: { createdAt: "desc" },
-    include: { _count: { select: { candidates: true } } }
+    include: { _count: { select: { candidates: true, runoffs: true } } }
   });
-  const eligible = ballots.filter(ballot => isStudentEligible(ballot, student));
+  const eligible = ballots.filter(ballot => !ballot.runoffOfBallotId && isStudentEligible(ballot, student));
   const nominations = await prisma.candidate.findMany({
     where: { studentId: request.auth.sub, ballotId: { in: eligible.map(ballot => ballot.id) } }
   });
@@ -119,7 +119,8 @@ router.get("/", async (request: AuthenticatedRequest, response) => {
     return {
       ballot: ballotRecord(ballot),
       nomination: nomination ? nominationRecord(nomination) : null,
-      canNominate: ballotPhase(ballot.startTime, ballot.endTime) === "NOMINATIONS_OPEN"
+      canNominate: !ballot.runoffOfBallotId
+        && ballotPhase(ballot.startTime, ballot.endTime, ballot.runoffOfBallotId) === "NOMINATIONS_OPEN"
         && (!nomination || ["REJECTED", "WITHDRAWN"].includes(nomination.nominationStatus))
     };
   });
@@ -150,7 +151,7 @@ router.post("/", async (request: AuthenticatedRequest, response) => {
     }),
     prisma.ballot.findUnique({
       where: { id: parsed.data.ballotId },
-      include: { _count: { select: { candidates: true } } }
+      include: { _count: { select: { candidates: true, runoffs: true } } }
     }),
     prisma.candidate.findUnique({
       where: { ballotId_studentId: { ballotId: parsed.data.ballotId, studentId: request.auth.sub } }
@@ -165,7 +166,13 @@ router.post("/", async (request: AuthenticatedRequest, response) => {
     response.status(403).json({ error: { code: "NOT_ELIGIBLE", message: "You are not eligible for this ballot" } });
     return;
   }
-  if (ballotPhase(ballot.startTime, ballot.endTime) !== "NOMINATIONS_OPEN") {
+  if (ballot.runoffOfBallotId) {
+    response.status(409).json({
+      error: { code: "RUNOFF_NOMINATIONS_CLOSED", message: "Runoff candidates are carried forward from the tied result" }
+    });
+    return;
+  }
+  if (ballotPhase(ballot.startTime, ballot.endTime, ballot.runoffOfBallotId) !== "NOMINATIONS_OPEN") {
     response.status(409).json({ error: { code: "NOMINATIONS_CLOSED", message: "Nominations are no longer open for this ballot" } });
     return;
   }

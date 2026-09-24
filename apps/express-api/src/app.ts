@@ -10,6 +10,9 @@ import { studentNominationsRouter } from "./routes/student-nominations.js";
 import { adminNominationsRouter } from "./routes/admin-nominations.js";
 import { studentVerificationRouter } from "./routes/student-verification.js";
 import { votingRouter } from "./routes/voting.js";
+import { publicReceiptsRouter } from "./routes/public-receipts.js";
+import { adminTalliesRouter } from "./routes/admin-tallies.js";
+import { publicResultsRouter } from "./routes/public-results.js";
 
 export const app = express();
 
@@ -41,6 +44,9 @@ app.use("/api/v1/student/ballots", studentBallotsRouter);
 app.use("/api/v1/student/nominations", studentNominationsRouter);
 app.use("/api/v1/admin/nominations", adminNominationsRouter);
 app.use("/api/v1/student/verification", studentVerificationRouter);
+app.use("/api/v1/public", publicReceiptsRouter);
+app.use("/api/v1/public", publicResultsRouter);
+app.use("/api/v1/admin", adminTalliesRouter);
 app.use("/api/v1", votingRouter);
 
 app.use((_request, response) => {
