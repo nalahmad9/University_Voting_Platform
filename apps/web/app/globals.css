@@ -50,10 +50,25 @@ body { background: var(--background); color: var(--foreground); font-family: Int
    balanced sign-in and student layouts. */
 @media (min-width: 1024px) {
   .admin-workspace-content {
-    width: 119.048%;
-    margin-left: -9.524%;
-    transform: scale(.84);
+    width: 111.111%;
+    margin-left: -5.556%;
+    transform: scale(.9);
     transform-origin: top center;
+  }
+
+  .admin-sidebar {
+    width: 14.5rem;
+    padding: 1.25rem;
+    font-size: .9rem;
+  }
+
+  .admin-sidebar nav {
+    margin-top: 1.5rem;
+  }
+
+  .admin-sidebar nav button {
+    gap: .625rem;
+    padding: .65rem .75rem;
   }
 }
 

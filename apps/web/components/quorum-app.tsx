@@ -213,7 +213,7 @@ function Shell({ role, user, children, onLogout }: { role: Role; user?: Authenti
 
   return (
     <div className="min-h-screen bg-[#f5f1e8] text-[#211a22] lg:flex">
-      <aside className="app-sidebar sticky top-0 hidden h-screen w-[270px] shrink-0 flex-col overflow-hidden bg-[#17111f] p-6 text-[#bfb4c4] lg:flex">
+      <aside className={`app-sidebar sticky top-0 hidden h-screen w-[270px] shrink-0 flex-col overflow-hidden bg-[#17111f] p-6 text-[#bfb4c4] lg:flex ${role === "admin" ? "admin-sidebar" : ""}`}>
         <Brand />
         <div className={`mt-10 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest ${role === "student" ? "bg-[#123c38] text-[#7bdbc2]" : "bg-[#49351d] text-[#ecc56e]"}`}>{role} access</div>
         <nav className="scrollbar-thin mt-7 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
