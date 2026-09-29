@@ -45,6 +45,17 @@ body { background: var(--background); color: var(--foreground); font-family: Int
   .app-sidebar { width: 15rem; }
 }
 
+/* Administrative forms and data workspaces are denser than the student
+   experience. Keep their usable canvas compact without changing the already
+   balanced sign-in and student layouts. */
+@media (min-width: 1024px) {
+  .admin-workspace-content {
+    width: 111.111%;
+    max-width: 80rem;
+    zoom: .9;
+  }
+}
+
 button, input, textarea, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button:not(:disabled), a[href], select:not(:disabled), summary, input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled), input[type="date"]:not(:disabled), input[type="time"]:not(:disabled), input[type="datetime-local"]:not(:disabled), [role="button"]:not([aria-disabled="true"]) { cursor: pointer; }

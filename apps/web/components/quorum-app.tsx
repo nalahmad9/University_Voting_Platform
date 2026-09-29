@@ -233,7 +233,7 @@ function Shell({ role, user, children, onLogout }: { role: Role; user?: Authenti
           <div className="flex items-center gap-2 lg:hidden"><QuorumSelect compact ariaLabel="Navigate" value={pathname} onValueChange={value=>router.push(value)} options={nav.map(([label,,path])=>({value:path,label}))}/><button aria-label="Sign out" onClick={onLogout} className="grid size-10 place-items-center rounded-xl border border-[#cbbfae] bg-white text-[#493d45] shadow-sm transition hover:border-[#8f2f43] hover:text-[#8f2f43]"><LogOut size={18} /></button></div>
           <div className="hidden items-center gap-2 text-sm text-[#6e665f] lg:flex"><ShieldCheck size={17} className="text-[#17745a]"/><span>Secure {role === "student" ? "student" : "administrator"} session</span></div>
         </header>
-        <main className="p-5 sm:p-8 lg:p-12"><div className="mx-auto max-w-6xl">{children}<footer className="mt-12 border-t border-[#d8cebd] py-6 text-xs text-[#756d66]">Quorum · Campus Election Authority</footer></div></main>
+        <main className="p-5 sm:p-8 lg:p-12"><div className={`mx-auto ${role === "admin" ? "admin-workspace-content" : "max-w-6xl"}`}>{children}<footer className="mt-12 border-t border-[#d8cebd] py-6 text-xs text-[#756d66]">Quorum · Campus Election Authority</footer></div></main>
       </div>
     </div>
   );
@@ -262,6 +262,17 @@ function NotFound() {
         <h1 className="display mt-3 text-5xl font-bold">This page is unavailable.</h1>
         <p className="mt-4 text-[#bdb3c2]">Return to sign in or use the public verification tools.</p>
         <button onClick={() => router.push("/")} className={`${primaryButton} mt-7`}>Return to sign in</button>
+      </div>
+    </div>
+  );
+}
+
+function RouteTransition() {
+  return (
+    <div className="grid min-h-screen place-items-center bg-[#17111f] text-white">
+      <div className="flex items-center gap-3 text-sm font-semibold text-[#d8cedc]">
+        <span className="size-2 animate-pulse rounded-full bg-[#d9ad5f]" />
+        Loading Quorum…
       </div>
     </div>
   );
@@ -382,12 +393,14 @@ export function QuorumApp() {
     return () => lifecycle.abort();
   }, [router]);
 
-  if (!authReady || !hydrated || (pathname === "/" && session)) return <div className="min-h-screen bg-[#15101c]" />;
+  const protectedRoute = pathname.startsWith("/student/") || pathname.startsWith("/admin/");
+
+  if (!authReady || !hydrated || (pathname === "/" && session) || (protectedRoute && !session)) return <RouteTransition />;
   if (pathname === "/") return <Login onAuthenticated={authenticated} />;
   if (pathname === "/public/verify") return <PublicPage><Ledger /></PublicPage>;
   if (pathname === "/public/results") return <PublicPage><PublicResults /></PublicPage>;
-  if (pathname.startsWith("/student/") && session?.role !== "student") return <NotFound />;
-  if (pathname.startsWith("/admin/") && session?.role !== "admin") return <NotFound />;
+  if (pathname.startsWith("/student/") && session?.role === "admin") return <NotFound />;
+  if (pathname.startsWith("/admin/") && session?.role === "student") return <NotFound />;
 
   const studentUser = session?.role === "student" ? session.user : undefined;
   const administratorUser = session?.role === "admin" ? session.user : undefined;
