@@ -233,7 +233,7 @@ function Shell({ role, user, children, onLogout }: { role: Role; user?: Authenti
           <div className="flex items-center gap-2 lg:hidden"><QuorumSelect compact ariaLabel="Navigate" value={pathname} onValueChange={value=>router.push(value)} options={nav.map(([label,,path])=>({value:path,label}))}/><button aria-label="Sign out" onClick={onLogout} className="grid size-10 place-items-center rounded-xl border border-[#cbbfae] bg-white text-[#493d45] shadow-sm transition hover:border-[#8f2f43] hover:text-[#8f2f43]"><LogOut size={18} /></button></div>
           <div className="hidden items-center gap-2 text-sm text-[#6e665f] lg:flex"><ShieldCheck size={17} className="text-[#17745a]"/><span>Secure {role === "student" ? "student" : "administrator"} session</span></div>
         </header>
-        <main className="p-5 sm:p-8 lg:p-12"><div className={`mx-auto ${role === "admin" ? "admin-workspace-content" : "max-w-6xl"}`}>{children}<footer className="mt-12 border-t border-[#d8cebd] py-6 text-xs text-[#756d66]">Quorum · Campus Election Authority</footer></div></main>
+        <main className="p-5 sm:p-8 lg:p-12"><div className={`mx-auto max-w-6xl ${role === "admin" ? "overflow-x-clip" : ""}`}><div className={role === "admin" ? "admin-workspace-content" : undefined}>{children}<footer className="mt-12 border-t border-[#d8cebd] py-6 text-xs text-[#756d66]">Quorum · Campus Election Authority</footer></div></div></main>
       </div>
     </div>
   );
