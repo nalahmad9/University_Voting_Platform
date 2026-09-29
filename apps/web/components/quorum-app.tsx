@@ -151,14 +151,14 @@ function Login({ onAuthenticated }: { onAuthenticated: (session: QuorumSession) 
   };
 
   return (
-    <main className="fine-grid min-h-screen bg-[#15101c] p-4 text-white sm:grid sm:place-items-center sm:p-6">
-      <div className="mx-auto grid min-h-[calc(100vh-32px)] w-full max-w-5xl overflow-hidden rounded-[30px] border border-white/10 bg-[#1b1422] shadow-2xl sm:min-h-0 sm:grid-cols-[1.05fr_.95fr]">
-        <section className="relative flex min-h-[350px] flex-col justify-between overflow-hidden p-7 sm:min-h-[680px] sm:p-12">
+    <main className="fine-grid min-h-screen bg-[#15101c] p-4 text-white sm:grid sm:place-items-center">
+      <div className="login-shell mx-auto grid min-h-[calc(100vh-32px)] w-full max-w-5xl overflow-hidden rounded-[30px] border border-white/10 bg-[#1b1422] shadow-2xl sm:min-h-0 sm:grid-cols-[1.05fr_.95fr]">
+        <section className="login-panel login-hero relative flex min-h-[350px] flex-col justify-between overflow-hidden p-7 sm:min-h-[680px] sm:p-12">
           <div className="absolute -right-24 top-36 size-80 rounded-full bg-[#8f2f43]/20 blur-3xl" />
           <Brand />
           <div className="relative max-w-lg">
             <p className="mb-5 text-xs font-semibold uppercase tracking-[.22em] text-[#d9ad5f]">Private by design · accountable by proof</p>
-            <h1 className="display text-4xl font-semibold leading-[1.08] text-[#fff7ef] sm:text-6xl">Every campus voice, counted with privacy and verifiable proof.</h1>
+            <h1 className="login-hero-title display text-4xl font-semibold leading-[1.08] text-[#fff7ef] sm:text-6xl">Every campus voice, counted with privacy and verifiable proof.</h1>
             <p className="mt-6 max-w-md leading-7 text-[#bdb3c2]">Nominate, compare, vote and verify through one trusted election workspace.</p>
           </div>
           <div className="relative grid grid-cols-3 gap-3 border-t border-white/10 pt-6 text-sm text-[#bdb3c2]">
@@ -167,9 +167,9 @@ function Login({ onAuthenticated }: { onAuthenticated: (session: QuorumSession) 
             <div><ClipboardCheck className="mb-2 text-[#b6a4e9]" size={20} /><strong className="block text-white">Receipt</strong>Publicly verifiable</div>
           </div>
         </section>
-        <section className="paper-noise flex flex-col justify-center bg-[#fbf8f1] p-7 text-[#211a22] sm:p-12">
+        <section className="login-panel paper-noise flex flex-col justify-center bg-[#fbf8f1] p-7 text-[#211a22] sm:p-12">
           <p className="text-xs font-bold uppercase tracking-[.2em] text-[#8f2f43]">University access</p>
-          <h2 className="display mt-3 text-4xl font-bold">Welcome back</h2>
+          <h2 className="login-form-title display mt-3 text-4xl font-bold">Welcome back</h2>
           <p className="mt-2 text-[#6e665f]">Use your registered university credentials.</p>
           <form onSubmit={(event) => { event.preventDefault(); void signIn(); }} className="mt-8 space-y-5">
             <label className="block text-sm font-semibold">University ID or email<input autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} className={fieldClass} /></label>
@@ -213,7 +213,7 @@ function Shell({ role, user, children, onLogout }: { role: Role; user?: Authenti
 
   return (
     <div className="min-h-screen bg-[#f5f1e8] text-[#211a22] lg:flex">
-      <aside className="sticky top-0 hidden h-screen w-[270px] shrink-0 flex-col overflow-hidden bg-[#17111f] p-6 text-[#bfb4c4] lg:flex">
+      <aside className="app-sidebar sticky top-0 hidden h-screen w-[270px] shrink-0 flex-col overflow-hidden bg-[#17111f] p-6 text-[#bfb4c4] lg:flex">
         <Brand />
         <div className={`mt-10 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest ${role === "student" ? "bg-[#123c38] text-[#7bdbc2]" : "bg-[#49351d] text-[#ecc56e]"}`}>{role} access</div>
         <nav className="scrollbar-thin mt-7 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
